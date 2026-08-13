@@ -17,13 +17,17 @@ const DEFAULTS = {
   joplinUrl: 'http://127.0.0.1:41184',
   parentNotebookTitle: 'Super Productivity',
   syncIntervalSec: 60,
+  syncTaskNotes: false,
 };
 
-// Matches sp-note-id markers written into a note body (see buildBody below).
-// The marker is how a Joplin note is matched back to its Super Productivity
-// note on the next sync, so no local id-mapping cache is needed and the link
-// survives plugin reinstalls.
+// Matches sp-note-id / sp-task-id markers written into a note body (see
+// buildBody/buildTaskBody below). The marker is how a Joplin note is matched
+// back to its Super Productivity note or task on the next sync, so no local
+// id-mapping cache is needed and the link survives plugin reinstalls. Notes
+// and tasks use distinct prefixes so a task note is never matched against a
+// project note (their ids are drawn from different, unrelated id spaces).
 const MARKER_PREFIX = '<!-- sp-note-id:';
+const TASK_MARKER_PREFIX = '<!-- sp-task-id:';
 const MARKER_SUFFIX = ' -->';
 
 // Executed inside a plain Node.js process via PluginAPI.executeNodeScript.
@@ -39,6 +43,7 @@ const baseUrl = String(input.baseUrl || '').replace(/\\/+$/, '');
 const token = String(input.token || '');
 const parentTitle = String(input.parentNotebookTitle || 'Super Productivity');
 const projects = Array.isArray(input.projects) ? input.projects : [];
+const syncTaskNotes = input.syncTaskNotes === true;
 
 function apiRequest(method, path, body) {
   return new Promise((resolve, reject) => {
@@ -112,12 +117,17 @@ async function listAll(path, fields) {
   return items;
 }
 
-async function findOrCreateFolder(title, parentId) {
+async function findFolder(title, parentId) {
   const existing = await listAll('/folders', 'id,title,parent_id');
   const match = existing.find(
     (f) => f.title === title && (f.parent_id || '') === (parentId || ''),
   );
-  if (match) return match.id;
+  return match ? match.id : null;
+}
+
+async function findOrCreateFolder(title, parentId) {
+  const existingId = await findFolder(title, parentId);
+  if (existingId) return existingId;
   const created = await apiRequest('POST', '/folders', {
     title,
     parent_id: parentId || undefined,
@@ -126,6 +136,7 @@ async function findOrCreateFolder(title, parentId) {
 }
 
 const MARKER_RE = /<!--\\s*sp-note-id:([a-zA-Z0-9_-]+)\\s*-->/;
+const TASK_MARKER_RE = /<!--\\s*sp-task-id:([a-zA-Z0-9_-]+)\\s*-->/;
 
 let rootFolderId;
 try {
@@ -185,6 +196,60 @@ for (const project of projects) {
         projectResult.deleted += 1;
       }
     }
+
+    const taskNotes = Array.isArray(project.taskNotes) ? project.taskNotes : [];
+    // Reconcile the Tasks sub-notebook whenever there's something new to add,
+    // or it already exists (so notes for tasks whose Notes field was cleared,
+    // or that were unassigned/deleted, still get cleaned up). Never create it
+    // just to find it empty, so projects with no task notes stay uncluttered.
+    const tasksFolderId = syncTaskNotes
+      ? taskNotes.length > 0
+        ? await findOrCreateFolder('Tasks', folderId)
+        : await findFolder('Tasks', folderId)
+      : null;
+    if (tasksFolderId) {
+      const existingTaskNotes = await listAll(
+        '/folders/' + tasksFolderId + '/notes',
+        'id,title,body',
+      );
+
+      const byTaskId = new Map();
+      for (const jn of existingTaskNotes) {
+        const match = jn.body && jn.body.match(TASK_MARKER_RE);
+        if (match) byTaskId.set(match[1], jn);
+      }
+
+      const seenTasks = new Set();
+      for (const note of taskNotes) {
+        seenTasks.add(note.id);
+        const existing = byTaskId.get(note.id);
+        if (existing) {
+          if (existing.body !== note.body || existing.title !== note.title) {
+            await apiRequest('PUT', '/notes/' + existing.id, {
+              title: note.title,
+              body: note.body,
+            });
+            projectResult.updated += 1;
+          } else {
+            projectResult.unchanged += 1;
+          }
+        } else {
+          await apiRequest('POST', '/notes', {
+            title: note.title,
+            body: note.body,
+            parent_id: tasksFolderId,
+          });
+          projectResult.created += 1;
+        }
+      }
+
+      for (const [taskId, jn] of byTaskId.entries()) {
+        if (!seenTasks.has(taskId)) {
+          await apiRequest('DELETE', '/notes/' + jn.id);
+          projectResult.deleted += 1;
+        }
+      }
+    }
   } catch (e) {
     projectResult.error = e.message;
   }
@@ -217,6 +282,10 @@ function buildBody(note) {
   return `${String(note.content || '').trimEnd()}\n\n${MARKER_PREFIX}${note.id}${MARKER_SUFFIX}`;
 }
 
+function buildTaskBody(task) {
+  return `${String(task.notes || '').trimEnd()}\n\n${TASK_MARKER_PREFIX}${task.id}${MARKER_SUFFIX}`;
+}
+
 async function loadEffectiveConfig() {
   const cfg = (await PluginAPI.getConfig()) || {};
   return {
@@ -225,6 +294,7 @@ async function loadEffectiveConfig() {
     syncIntervalSec: Number.isFinite(cfg.syncIntervalSec)
       ? cfg.syncIntervalSec
       : DEFAULTS.syncIntervalSec,
+    syncTaskNotes: cfg.syncTaskNotes === true,
   };
 }
 
@@ -289,24 +359,40 @@ async function performSync(trigger) {
   }
 
   const allProjects = await PluginAPI.getAllProjects();
-  const candidateProjects = allProjects.filter(
-    (p) => !p.isArchived && Array.isArray(p.noteIds) && p.noteIds.length > 0,
-  );
+  const candidateProjects = allProjects.filter((p) => !p.isArchived);
 
   const appState = await PluginAPI.getAppState();
   const notesById = appState.notes || {};
+  const tasksById = appState.tasks || {};
+  const allTasks = Object.values(tasksById);
 
   const payloadProjects = candidateProjects
     .map((p) => {
-      const notes = p.noteIds
+      const notes = (Array.isArray(p.noteIds) ? p.noteIds : [])
         .map((id) => notesById[id])
         .filter(
           (n) => !!n && typeof n.content === 'string' && n.content.trim().length > 0,
         )
         .map((n) => ({ id: n.id, title: deriveTitle(n.content), body: buildBody(n) }));
-      return { id: p.id, title: p.title, notes };
+
+      const taskNotes = config.syncTaskNotes
+        ? allTasks
+            .filter(
+              (t) =>
+                t.projectId === p.id &&
+                typeof t.notes === 'string' &&
+                t.notes.trim().length > 0,
+            )
+            .map((t) => ({
+              id: t.id,
+              title: t.title || 'Untitled task',
+              body: buildTaskBody(t),
+            }))
+        : [];
+
+      return { id: p.id, title: p.title, notes, taskNotes };
     })
-    .filter((p) => p.notes.length > 0);
+    .filter((p) => p.notes.length > 0 || p.taskNotes.length > 0);
 
   if (payloadProjects.length === 0) {
     lastSyncInfo = { at: Date.now(), trigger, success: true, results: [] };
@@ -327,6 +413,7 @@ async function performSync(trigger) {
           token,
           parentNotebookTitle: config.parentNotebookTitle,
           projects: payloadProjects,
+          syncTaskNotes: config.syncTaskNotes,
         },
       ],
       timeout: 25000,

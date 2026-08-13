@@ -61,9 +61,10 @@
   <body>
     <h1>Joplin Notes Sync</h1>
     <p class="text-muted">
-      Pushes each Super Productivity project's notes into a matching notebook in your
-      local Joplin app. One-way only (Super Productivity → Joplin) — the plugin API has no
-      way to write notes back into Super Productivity. Desktop only.
+      Pushes each Super Productivity project's notes (and, optionally, each task's own
+      notes) into a matching notebook in your local Joplin app. One-way only (Super
+      Productivity → Joplin) — the plugin API has no way to write notes back into Super
+      Productivity. Desktop only.
     </p>
 
     <div class="card">
@@ -101,7 +102,8 @@
     <div class="card">
       <h2>2. Connection settings</h2>
       <p class="text-muted">
-        Joplin URL, parent notebook name, and auto-sync interval are configured in
+        Joplin URL, parent notebook name, auto-sync interval, and whether task notes are
+        synced are configured in
         <strong>Settings → Plugins → Joplin Notes Sync</strong>.
       </p>
       <div
@@ -193,7 +195,8 @@
               state.config.syncIntervalSec > 0
                 ? state.config.syncIntervalSec + 's'
                 : 'disabled'
-            }`;
+            }\n` +
+            `Sync task notes: ${state.config.syncTaskNotes ? 'on' : 'off'}`;
           document.getElementById('status').textContent = formatSyncInfo(
             state.lastSyncInfo,
           );

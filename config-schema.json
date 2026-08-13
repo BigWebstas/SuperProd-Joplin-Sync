@@ -23,6 +23,12 @@
       "minimum": 0,
       "maximum": 3600,
       "default": 60
+    },
+    "syncTaskNotes": {
+      "type": "boolean",
+      "title": "Sync task notes",
+      "description": "Also push each task's own Notes field (opened from the task itself) into a \"Tasks\" sub-notebook under the project. This is separate from the project's Notes tab, which is always synced.",
+      "default": false
     }
   },
   "required": []

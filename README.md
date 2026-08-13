@@ -27,8 +27,8 @@ Joplin notes.
    pointing at a zip of this folder), then open it from the app menu.
 3. Paste the token under "1. Joplin API token" and save. The token is stored as a
    local secret on this device only (never synced, exported, or backed up).
-4. Optionally adjust the Joplin URL, parent notebook name, or auto-sync interval
-   under **Settings → Plugins → Joplin Notes Sync**.
+4. Optionally adjust the Joplin URL, parent notebook name, auto-sync interval, or
+   whether task notes are synced, under **Settings → Plugins → Joplin Notes Sync**.
 5. Grant the Node execution permission when prompted, either via the "Sync Now"
    button on the plugin page or the header "Joplin Sync" button.
 
@@ -46,11 +46,24 @@ plugin reinstalls and doesn't depend on any local cache.
 <parent notebook, default "Super Productivity">
   └── <project title>
         ├── <note 1 title>
-        └── <note 2 title>
+        ├── <note 2 title>
+        └── Tasks/                     (only if "Sync task notes" is enabled)
+              ├── <task 1 title>
+              └── <task 2 title>
 ```
 
 Note titles are derived from the first non-empty line of the note's markdown
 content (headings/list markers stripped, truncated to 80 characters).
+
+### Task notes (optional)
+
+Enabling **Sync task notes** additionally pushes each task's own **Notes** field
+(the one you open from the task itself) into a `Tasks` sub-notebook under its
+project — one Joplin note per task, titled with the task's own title, for any
+task belonging to that project with non-empty notes (done or not, top-level or
+subtask). This is separate from, and in addition to, the project's Notes tab,
+which is always synced. Task notes are matched back by task id the same way
+project notes are matched by note id, so the two never collide.
 
 ## Packaging
 
