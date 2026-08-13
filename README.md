@@ -27,8 +27,10 @@ Joplin notes.
   capability spawns a Node process by passing the whole script and all its data as a
   single command-line argument, which has a much lower effective length limit on
   Windows than on Linux/macOS — the plugin works around this by syncing one project
-  per call (see the comment above `NODE_SYNC_SCRIPT` in `plugin.js`), but a single
-  project with a very large amount of note content could theoretically still hit it.
+  per call, and, within a project, splitting its notes and task notes into further
+  calls if there's enough content that even one project's payload would exceed a
+  conservative size budget (see `MAX_PROJECT_PAYLOAD_CHARS` and the comment above
+  `NODE_SYNC_SCRIPT` in `plugin.js`).
 - **The plugin fully manages the target notebooks.** A note deleted in a Super
   Productivity project is deleted from the corresponding Joplin notebook on the next
   sync. Don't keep manually-created notes inside the notebooks this plugin creates.

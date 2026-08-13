@@ -203,7 +203,10 @@ const PULL_SETTLE_MS = 2 * 60 * 1000;
 // baseline is treated as "changed"; if both moved, the more recently
 // modified one wins.
 function decideTaskAction(item, existingNote, ctx) {
-  const spContent = item.content;
+  // item.body already carries the marker-stamped content (see buildTaskBody);
+  // stripping it back off here avoids also transmitting a separate, fully
+  // redundant content field for every task note in the payload.
+  const spContent = stripTaskMarker(item.body);
   if (!existingNote) {
     return spContent === '' ? { action: 'none' } : { action: 'create' };
   }
@@ -264,9 +267,7 @@ for (const project of projects) {
       if (match) byNoteId.set(match[1], jn);
     }
 
-    const seen = new Set();
     for (const note of project.notes) {
-      seen.add(note.id);
       const existing = byNoteId.get(note.id);
       if (existing) {
         if (existing.body !== note.body || existing.title !== note.title) {
@@ -288,10 +289,21 @@ for (const project of projects) {
       }
     }
 
-    for (const [spNoteId, jn] of byNoteId.entries()) {
-      if (!seen.has(spNoteId)) {
-        await apiRequest('DELETE', '/notes/' + jn.id);
-        projectResult.deleted += 1;
+    // A large project can be split across several calls to stay under the
+    // command-line size a single executeNodeScript spawn can carry (see
+    // MAX_PROJECT_PAYLOAD_CHARS in the outer plugin code) — each call only
+    // sees its own slice of project.notes, so only the LAST call for a
+    // project carries the full, authoritative set of current note ids
+    // (noteValidIds) and actually runs the orphan-deletion sweep. Earlier
+    // calls skip it entirely rather than risk deleting notes that simply
+    // belong to a different chunk.
+    if (project.isLastChunk && Array.isArray(project.noteValidIds)) {
+      const validNoteIds = new Set(project.noteValidIds);
+      for (const [spNoteId, jn] of byNoteId.entries()) {
+        if (!validNoteIds.has(spNoteId)) {
+          await apiRequest('DELETE', '/notes/' + jn.id);
+          projectResult.deleted += 1;
+        }
       }
     }
 
@@ -316,11 +328,10 @@ for (const project of projects) {
         if (match) byTaskId.set(match[1], jn);
       }
 
-      const seenTasks = new Set();
       for (const item of taskNotes) {
-        seenTasks.add(item.id);
         const existing = byTaskId.get(item.id) || null;
         const decision = decideTaskAction(item, existing, { pullsAllowed });
+        const spContent = stripTaskMarker(item.body);
 
         switch (decision.action) {
           case 'create':
@@ -331,7 +342,7 @@ for (const project of projects) {
               parent_id: tasksFolderId,
             });
             projectResult.created += 1;
-            projectResult.taskNotesSynced[item.id] = item.content;
+            projectResult.taskNotesSynced[item.id] = spContent;
             break;
           case 'update':
             await apiRequest('PUT', '/notes/' + existing.id, {
@@ -339,7 +350,7 @@ for (const project of projects) {
               body: item.body,
             });
             projectResult.updated += 1;
-            projectResult.taskNotesSynced[item.id] = item.content;
+            projectResult.taskNotesSynced[item.id] = spContent;
             break;
           case 'delete':
             await apiRequest('DELETE', '/notes/' + existing.id);
@@ -357,10 +368,15 @@ for (const project of projects) {
         }
       }
 
-      for (const [taskId, jn] of byTaskId.entries()) {
-        if (!seenTasks.has(taskId)) {
-          await apiRequest('DELETE', '/notes/' + jn.id);
-          projectResult.deleted += 1;
+      // Same reasoning as the notes sweep above: only the last chunk for a
+      // project carries taskValidIds and runs this.
+      if (project.isLastChunk && Array.isArray(project.taskValidIds)) {
+        const validTaskIds = new Set(project.taskValidIds);
+        for (const [taskId, jn] of byTaskId.entries()) {
+          if (!validTaskIds.has(taskId)) {
+            await apiRequest('DELETE', '/notes/' + jn.id);
+            projectResult.deleted += 1;
+          }
         }
       }
     }
@@ -427,6 +443,38 @@ function buildBody(note) {
 
 function buildTaskBody(task, syncId) {
   return `${String(task.notes || '').trimEnd()}\n\n${TASK_MARKER_PREFIX}${syncId}${MARKER_SUFFIX}`;
+}
+
+// Conservative budget for one project chunk's JSON-stringified notes (or
+// taskNotes) array, in characters. Super Productivity's executeNodeScript
+// spawns Node with the whole script AND the JSON-stringified args embedded
+// in one Windows command-line argument (~32K chars, and quoting can inflate
+// that further for JSON-heavy text); NODE_SYNC_SCRIPT's own source already
+// accounts for a good chunk of that budget on its own. This leaves generous
+// headroom rather than trying to compute the limit exactly.
+const MAX_PROJECT_PAYLOAD_CHARS = 8000;
+
+// Greedily packs items into chunks whose combined JSON size stays under
+// maxChars, preserving order. A single item larger than maxChars still gets
+// its own chunk rather than being dropped or looping forever. Always returns
+// at least one (possibly empty) chunk, so callers don't need a special case
+// for an empty input array.
+function chunkBySize(items, maxChars) {
+  const chunks = [];
+  let current = [];
+  let currentSize = 2; // "[]"
+  for (const item of items) {
+    const itemSize = JSON.stringify(item).length + 1; // + comma/spacing
+    if (current.length > 0 && currentSize + itemSize > maxChars) {
+      chunks.push(current);
+      current = [];
+      currentSize = 2;
+    }
+    current.push(item);
+    currentSize += itemSize;
+  }
+  chunks.push(current);
+  return chunks;
 }
 
 // The "last synced content" baseline per task sync id (see normalizeTaskId),
@@ -580,10 +628,14 @@ async function performSync(trigger) {
               // marker in Joplin, which we don't try to support), so skip it
               // to keep the payload proportional to tasks that matter.
               if (content === '' && lastSynced === null) return null;
+              // `content` itself isn't sent — it's fully recoverable from
+              // `body` (stripTaskMarker(body) === content) by the Node
+              // script, and every duplicated byte here counts against the
+              // Windows command-line length that executeNodeScript's spawn
+              // call is limited by (see MAX_PROJECT_PAYLOAD_CHARS below).
               return {
                 id: syncId,
                 title: t.title || 'Untitled task',
-                content,
                 body: buildTaskBody(t, syncId),
                 spUpdated: t.updated || t.created || 0,
                 lastSynced,
@@ -609,60 +661,83 @@ async function performSync(trigger) {
   // every project's node script call agrees on whether a pull is safe.
   const pullsAllowed = Date.now() >= pullsUnsafeUntil;
 
-  // One executeNodeScript call per project, not one call for everything.
-  // Super Productivity's host runs this via `spawn(node, ['-e', wrappedScript])`
-  // with the whole script AND the JSON-stringified args embedded in that single
-  // command-line argument (see electron/plugin-node-executor.ts upstream) — on
-  // Windows that has a much lower effective length limit than Linux/macOS, and
-  // there's no size cap on args there (only the script text is capped at
-  // 100KB), so a large combined notes payload fails with "spawn ENAMETOOLONG".
-  // Keeping each call to a single project's data keeps every command line
-  // small regardless of how much is synced overall.
+  // At least one executeNodeScript call per project, not one call for
+  // everything. Super Productivity's host runs this via
+  // `spawn(node, ['-e', wrappedScript])` with the whole script AND the
+  // JSON-stringified args embedded in that single command-line argument (see
+  // electron/plugin-node-executor.ts upstream) — on Windows that has a much
+  // lower effective length limit than Linux/macOS, and there's no size cap on
+  // args there (only the script text is capped at 100KB), so a large enough
+  // combined notes payload fails with "spawn ENAMETOOLONG". Keeping each call
+  // small regardless of how much is synced overall takes two things: one
+  // call per project (below), and, within a project, chunking its notes and
+  // taskNotes arrays so no single call's payload exceeds
+  // MAX_PROJECT_PAYLOAD_CHARS regardless of how much content or how many
+  // tasks that project has. Only the last chunk for a project carries the
+  // full valid-id lists and runs the orphan-deletion sweep (see
+  // NODE_SYNC_SCRIPT) — earlier chunks only create/update.
   const results = [];
   let hardFailure = null;
-  for (const project of payloadProjects) {
-    let outcome;
-    try {
-      outcome = await PluginAPI.executeNodeScript({
-        script: NODE_SYNC_SCRIPT,
-        args: [
-          {
-            baseUrl: config.joplinUrl,
-            token,
-            parentNotebookTitle: config.parentNotebookTitle,
-            projects: [project],
-            syncTaskNotes: config.syncTaskNotes,
-            pullsAllowed,
-          },
-        ],
-        timeout: 25000,
-      });
-    } catch (e) {
-      hardFailure = e.message || String(e);
-      break;
-    }
+  outer: for (const project of payloadProjects) {
+    const noteChunks = chunkBySize(project.notes, MAX_PROJECT_PAYLOAD_CHARS);
+    const taskChunks = chunkBySize(project.taskNotes, MAX_PROJECT_PAYLOAD_CHARS);
+    const chunkCount = Math.max(noteChunks.length, taskChunks.length);
 
-    if (!outcome || !outcome.success) {
-      const errCode =
-        outcome && outcome.error && typeof outcome.error === 'object'
-          ? outcome.error.code
-          : null;
-      hardFailure =
-        errCode === 'NO_CONSENT' || errCode === 'PERMISSION_DENIED'
-          ? 'Node execution permission was not granted. Enable it for this plugin in Settings → Plugins.'
-          : (outcome && outcome.error && outcome.error.message) ||
-            (outcome && outcome.error) ||
-            'Unknown error';
-      break;
-    }
+    for (let i = 0; i < chunkCount; i++) {
+      const isLastChunk = i === chunkCount - 1;
+      const projectChunk = {
+        id: project.id,
+        title: project.title,
+        notes: noteChunks[i] || [],
+        taskNotes: taskChunks[i] || [],
+        isLastChunk,
+        noteValidIds: isLastChunk ? project.notes.map((n) => n.id) : undefined,
+        taskValidIds: isLastChunk ? project.taskNotes.map((t) => t.id) : undefined,
+      };
 
-    const scriptResult = outcome.result || {};
-    if (!scriptResult.success) {
-      hardFailure = scriptResult.error || 'Unknown error';
-      break;
-    }
+      let outcome;
+      try {
+        outcome = await PluginAPI.executeNodeScript({
+          script: NODE_SYNC_SCRIPT,
+          args: [
+            {
+              baseUrl: config.joplinUrl,
+              token,
+              parentNotebookTitle: config.parentNotebookTitle,
+              projects: [projectChunk],
+              syncTaskNotes: config.syncTaskNotes,
+              pullsAllowed,
+            },
+          ],
+          timeout: 25000,
+        });
+      } catch (e) {
+        hardFailure = e.message || String(e);
+        break outer;
+      }
 
-    results.push(...(scriptResult.results || []));
+      if (!outcome || !outcome.success) {
+        const errCode =
+          outcome && outcome.error && typeof outcome.error === 'object'
+            ? outcome.error.code
+            : null;
+        hardFailure =
+          errCode === 'NO_CONSENT' || errCode === 'PERMISSION_DENIED'
+            ? 'Node execution permission was not granted. Enable it for this plugin in Settings → Plugins.'
+            : (outcome && outcome.error && outcome.error.message) ||
+              (outcome && outcome.error) ||
+              'Unknown error';
+        break outer;
+      }
+
+      const scriptResult = outcome.result || {};
+      if (!scriptResult.success) {
+        hardFailure = scriptResult.error || 'Unknown error';
+        break outer;
+      }
+
+      results.push(...(scriptResult.results || []));
+    }
   }
 
   if (hardFailure) {
