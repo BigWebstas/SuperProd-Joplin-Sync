@@ -26,8 +26,8 @@
     },
     "syncTaskNotes": {
       "type": "boolean",
-      "title": "Sync task notes",
-      "description": "Also push each task's own Notes field (opened from the task itself) into a \"Tasks\" sub-notebook under the project. One-way (Super Productivity → Joplin), same as the project's Notes tab, which is always synced.",
+      "title": "Sync task notes (two-way)",
+      "description": "Two-way sync of each task's own Notes field (opened from the task itself) with a \"Tasks\" sub-notebook under the project — edits in either app get pushed to the other. If a task's notes changed in both places since the last sync, the more recently edited side wins and overwrites the other. Separate from the project's Notes tab, which is always synced one-way.",
       "default": false
     }
   },

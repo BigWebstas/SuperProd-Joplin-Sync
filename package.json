@@ -1,7 +1,7 @@
 {
   "name": "joplin-notes-sync",
-  "version": "1.1.5",
-  "description": "Super Productivity plugin: one-way sync of project notes, and optionally task notes, into Joplin notebooks.",
+  "version": "1.2.0",
+  "description": "Super Productivity plugin: sync project notes (one-way) and, optionally, task notes (two-way) into Joplin notebooks.",
   "scripts": {
     "build": "echo 'No build needed for simple plugin'"
   }
