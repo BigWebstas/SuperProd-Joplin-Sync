@@ -1,0 +1,33 @@
+{
+  "id": "joplin-notes-sync",
+  "name": "Joplin Notes Sync",
+  "manifestVersion": 1,
+  "version": "1.0.0",
+  "minSupVersion": "18.15.0",
+  "description": "One-way push of project notes into a Joplin notebook via Joplin's local Web Clipper API. Desktop only.",
+  "author": "Super Productivity",
+  "permissions": [
+    "getAllProjects",
+    "getAppState",
+    "getConfig",
+    "setSecret",
+    "getSecret",
+    "deleteSecret",
+    "nodeExecution",
+    "showSnack",
+    "registerHook",
+    "registerHeaderButton",
+    "onMessage",
+    "onReady",
+    "onUnload"
+  ],
+  "nodeScriptConfig": {
+    "timeout": 30000,
+    "memoryLimit": "128MB"
+  },
+  "hooks": ["persistedDataChanged"],
+  "iFrame": true,
+  "isSkipMenuEntry": false,
+  "jsonSchemaCfg": "config-schema.json",
+  "icon": "icon.svg"
+}

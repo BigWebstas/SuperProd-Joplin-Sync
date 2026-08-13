@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Joplin Notes Sync Settings",
+  "description": "Non-secret connection settings. Set your Joplin API token from the plugin's own page (Menu → Joplin Notes Sync) — it is stored as a local secret, never here.",
+  "type": "object",
+  "properties": {
+    "joplinUrl": {
+      "type": "string",
+      "title": "Joplin Web Clipper URL",
+      "description": "Base URL of Joplin's local Web Clipper API. Enable it in Joplin under Options → Web Clipper.",
+      "default": "http://127.0.0.1:41184"
+    },
+    "parentNotebookTitle": {
+      "type": "string",
+      "title": "Parent notebook",
+      "description": "Notebook created in Joplin to hold one sub-notebook per Super Productivity project.",
+      "default": "Super Productivity"
+    },
+    "syncIntervalSec": {
+      "type": "integer",
+      "title": "Auto-sync interval (seconds)",
+      "description": "How often to check for changed notes and push them to Joplin. Set to 0 to disable automatic sync (manual button only). Values under 15 are treated as 15.",
+      "minimum": 0,
+      "maximum": 3600,
+      "default": 60
+    }
+  },
+  "required": []
+}

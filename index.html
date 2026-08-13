@@ -1,0 +1,237 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Joplin Notes Sync</title>
+    <style>
+      body {
+        padding: var(--s3);
+        max-width: 640px;
+      }
+      h1 {
+        font-size: 1.25rem;
+        margin: 0 0 var(--s);
+      }
+      h2 {
+        font-size: 1rem;
+        margin: 0 0 var(--s-half);
+      }
+      p {
+        margin: 0 0 var(--s2);
+      }
+      .card {
+        padding: var(--s2);
+        margin-bottom: var(--s2);
+      }
+      .row {
+        display: flex;
+        gap: var(--s);
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      input[type='password'],
+      input[type='text'] {
+        flex: 1;
+        min-width: 200px;
+        padding: var(--s-half);
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.8rem;
+      }
+      .badge.ok {
+        background: var(--c-primary);
+        color: white;
+      }
+      .badge.warn {
+        background: var(--c-warn);
+        color: white;
+      }
+      ol {
+        padding-left: 1.2em;
+      }
+      .status {
+        white-space: pre-wrap;
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Joplin Notes Sync</h1>
+    <p class="text-muted">
+      Pushes each Super Productivity project's notes into a matching notebook in your
+      local Joplin app. One-way only (Super Productivity → Joplin) — the plugin API has no
+      way to write notes back into Super Productivity. Desktop only.
+    </p>
+
+    <div class="card">
+      <h2>
+        1. Joplin API token
+        <span
+          id="tokenBadge"
+          class="badge warn"
+          >not set</span
+        >
+      </h2>
+      <ol>
+        <li>
+          In Joplin, open <strong>Options → Web Clipper</strong> and enable the service.
+        </li>
+        <li>Copy the <strong>Authorization token</strong> shown there.</li>
+        <li>Paste it below and save. It is stored locally on this device only.</li>
+      </ol>
+      <div class="row">
+        <input
+          id="tokenInput"
+          type="password"
+          placeholder="Joplin API token"
+        />
+        <button
+          id="saveTokenBtn"
+          class="btn-primary"
+        >
+          Save
+        </button>
+        <button id="clearTokenBtn">Clear</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2. Connection settings</h2>
+      <p class="text-muted">
+        Joplin URL, parent notebook name, and auto-sync interval are configured in
+        <strong>Settings → Plugins → Joplin Notes Sync</strong>.
+      </p>
+      <div
+        id="configSummary"
+        class="status text-muted"
+      >
+        Loading…
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>3. Sync</h2>
+      <div class="row">
+        <button
+          id="syncNowBtn"
+          class="btn-primary"
+        >
+          Sync Now
+        </button>
+      </div>
+      <div
+        id="status"
+        class="status"
+      ></div>
+    </div>
+
+    <script>
+      function sendMessage(message) {
+        return new Promise((resolve, reject) => {
+          const messageId = Date.now().toString() + Math.random().toString(36).slice(2);
+          const timeout = setTimeout(() => {
+            window.removeEventListener('message', handler);
+            reject(new Error('Message timeout'));
+          }, 15000);
+
+          function handler(event) {
+            if (event.source !== window.parent) return;
+            if (event.data?.messageId !== messageId) return;
+            clearTimeout(timeout);
+            window.removeEventListener('message', handler);
+            if (event.data.type === 'PLUGIN_MESSAGE_ERROR') {
+              reject(new Error(event.data.error || 'Unknown error'));
+            } else {
+              resolve(event.data.result);
+            }
+          }
+
+          window.addEventListener('message', handler);
+          window.parent.postMessage({ type: 'PLUGIN_MESSAGE', message, messageId }, '*');
+        });
+      }
+
+      function formatSyncInfo(info) {
+        if (!info) return 'Not synced yet.';
+        const when = new Date(info.at).toLocaleString();
+        if (!info.success && info.error) {
+          return `[${when}] Failed: ${info.error}`;
+        }
+        if (!info.results || info.results.length === 0) {
+          return `[${when}] Nothing to sync (no projects with notes).`;
+        }
+        const lines = info.results.map((r) => {
+          const parts = [];
+          if (r.created) parts.push(`${r.created} created`);
+          if (r.updated) parts.push(`${r.updated} updated`);
+          if (r.deleted) parts.push(`${r.deleted} deleted`);
+          if (r.unchanged) parts.push(`${r.unchanged} unchanged`);
+          if (r.error) parts.push(`error: ${r.error}`);
+          return `  • ${r.projectTitle}: ${parts.join(', ') || 'no changes'}`;
+        });
+        return `[${when}] (${info.trigger})\n` + lines.join('\n');
+      }
+
+      async function refreshState() {
+        try {
+          const state = await sendMessage({ type: 'getState' });
+          const badge = document.getElementById('tokenBadge');
+          if (state.hasToken) {
+            badge.textContent = 'set';
+            badge.className = 'badge ok';
+          } else {
+            badge.textContent = 'not set';
+            badge.className = 'badge warn';
+          }
+          document.getElementById('configSummary').textContent =
+            `Joplin URL: ${state.config.joplinUrl}\n` +
+            `Parent notebook: ${state.config.parentNotebookTitle}\n` +
+            `Auto-sync interval: ${
+              state.config.syncIntervalSec > 0
+                ? state.config.syncIntervalSec + 's'
+                : 'disabled'
+            }`;
+          document.getElementById('status').textContent = formatSyncInfo(
+            state.lastSyncInfo,
+          );
+        } catch (e) {
+          document.getElementById('status').textContent =
+            'Error loading state: ' + e.message;
+        }
+      }
+
+      document.getElementById('saveTokenBtn').addEventListener('click', async () => {
+        const value = document.getElementById('tokenInput').value;
+        if (!value.trim()) return;
+        await sendMessage({ type: 'saveToken', token: value });
+        document.getElementById('tokenInput').value = '';
+        refreshState();
+      });
+
+      document.getElementById('clearTokenBtn').addEventListener('click', async () => {
+        await sendMessage({ type: 'clearToken' });
+        document.getElementById('tokenInput').value = '';
+        refreshState();
+      });
+
+      document.getElementById('syncNowBtn').addEventListener('click', async () => {
+        const btn = document.getElementById('syncNowBtn');
+        btn.disabled = true;
+        document.getElementById('status').textContent = 'Syncing…';
+        try {
+          await sendMessage({ type: 'syncNow' });
+        } catch (e) {
+          document.getElementById('status').textContent = 'Error: ' + e.message;
+        } finally {
+          btn.disabled = false;
+          refreshState();
+        }
+      });
+
+      refreshState();
+    </script>
+  </body>
+</html>
