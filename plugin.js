@@ -160,8 +160,13 @@ async function findOrCreateFolder(title, parentId) {
   return created.id;
 }
 
-const MARKER_RE = /<!--\\s*sp-note-id:([a-zA-Z0-9_-]+)\\s*-->/;
-const TASK_MARKER_RE = /<!--\\s*sp-task-id:([a-zA-Z0-9_-]+)\\s*-->/;
+// Ids are opaque, whitespace-free tokens, so match anything up to the
+// trailing space + "-->" rather than an alphanumeric allowlist — calendar-
+// imported task ids contain "@" and "." (e.g. "...@google.com"), which an
+// [a-zA-Z0-9_-]+ class would silently fail to match at all, making every
+// synced note for that task permanently unrecognizable on the next sync.
+const MARKER_RE = /<!--\\s*sp-note-id:(\\S+)\\s*-->/;
+const TASK_MARKER_RE = /<!--\\s*sp-task-id:(\\S+)\\s*-->/;
 
 let rootFolderId;
 try {
