@@ -332,6 +332,13 @@ for (const project of projects) {
         const existing = byTaskId.get(item.id) || null;
         const decision = decideTaskAction(item, existing, { pullsAllowed });
         const spContent = stripTaskMarker(item.body);
+        // The title (e.g. a "[Done]" prefix toggling when a task is
+        // completed) is SP-driven and one-way, independent of the two-way
+        // notes-content diff decideTaskAction just made -- if the content
+        // decision doesn't already involve writing to Joplin (pull and
+        // no-op don't), a stale title still needs fixing up on its own
+        // rather than waiting for a future content change to carry it along.
+        const titleStale = !!existing && existing.title !== item.title;
 
         switch (decision.action) {
           case 'create':
@@ -358,10 +365,19 @@ for (const project of projects) {
             projectResult.taskNotesSynced[item.id] = '';
             break;
           case 'pull':
+            if (titleStale) {
+              await apiRequest('PUT', '/notes/' + existing.id, { title: item.title });
+              projectResult.updated += 1;
+            }
             projectResult.taskNotesPulled.push({ taskId: item.id, content: decision.content });
             break;
           default:
-            projectResult.unchanged += 1;
+            if (titleStale) {
+              await apiRequest('PUT', '/notes/' + existing.id, { title: item.title });
+              projectResult.updated += 1;
+            } else {
+              projectResult.unchanged += 1;
+            }
             if (decision.syncedContent !== undefined) {
               projectResult.taskNotesSynced[item.id] = decision.syncedContent;
             }
@@ -635,7 +651,7 @@ async function performSync(trigger) {
               // call is limited by (see MAX_PROJECT_PAYLOAD_CHARS below).
               return {
                 id: syncId,
-                title: t.title || 'Untitled task',
+                title: (t.isDone ? '[Done] ' : '') + (t.title || 'Untitled task'),
                 body: buildTaskBody(t, syncId),
                 spUpdated: t.updated || t.created || 0,
                 lastSynced,

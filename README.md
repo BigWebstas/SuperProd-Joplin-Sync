@@ -82,6 +82,12 @@ top-level or subtask. This is separate from, and in addition to, the project's
 Notes tab, which is always one-way. Task notes are matched back by task id the
 same way project notes are matched by note id, so the two never collide.
 
+A completed task's Joplin note title gets a `[Done] ` prefix (e.g. `[Done] Buy
+groceries`), independently of whether its notes content changed — marking a task
+done pushes the title update on its own next sync, and un-marking it removes the
+prefix again. This is SP → Joplin only, same direction as the title itself
+always syncs; there's no "done" concept on the Joplin side to pull back.
+
 Recurring calendar-imported tasks (Google/ICS) get a new task id per day's
 occurrence; the plugin strips that trailing occurrence timestamp before using
 the id as the sync key, so a daily recurring event still collapses onto a
