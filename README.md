@@ -6,12 +6,16 @@ Joplin notes.
 
 ## Important limitations
 
-- **Project notes are one-way only** (Super Productivity → Joplin). The plugin API
-  does not allow plugins to create, update, or delete this kind of note inside Super
-  Productivity, so nothing written in Joplin ever comes back. Treat the notebooks
-  these land in as a mirror, not a place to edit.
-- **Task notes, if enabled, are two-way** — see [Task notes](#task-notes-optional)
-  below for how conflicts are resolved.
+- **One-way only** (Super Productivity → Joplin), for both project notes and task
+  notes. Project notes are one-way because the plugin API has no way to create,
+  update, or delete this kind of note inside Super Productivity at all. Task notes
+  *could* technically go both ways (`PluginAPI.updateTask` can write a task's notes
+  field), and an earlier version of this plugin did that — but calling it on a
+  schedule collided with Super Productivity's own cross-device sync: if you run
+  Super Productivity on more than one device, the two syncs would race on the same
+  task, and Super Productivity resolved the collision by duplicating the task
+  instead of merging it. Treat the notebooks this plugin creates as a mirror, not a
+  place to edit.
 - **Desktop only.** Joplin's REST API only listens on `127.0.0.1`, which the browser
   sandbox blocks for regular plugin network calls. This plugin instead runs the HTTP
   calls through Super Productivity's `nodeExecution` capability (Electron desktop
@@ -59,28 +63,18 @@ content (headings/list markers stripped, truncated to 80 characters).
 
 ### Task notes (optional)
 
-Enabling **Sync task notes** additionally syncs each task's own **Notes** field
-(the one you open from the task itself) with a `Tasks` sub-notebook under its
+Enabling **Sync task notes** additionally pushes each task's own **Notes** field
+(the one you open from the task itself) into a `Tasks` sub-notebook under its
 project — one Joplin note per task, titled with the task's own title, for any
-task belonging to that project that has (or has ever had) notes, done or not,
-top-level or subtask. This is separate from, and in addition to, the project's
-Notes tab, which is always one-way. Task notes are matched back by task id the
-same way project notes are matched by note id, so the two never collide.
+task belonging to that project with non-empty notes, done or not, top-level or
+subtask. This is separate from, and in addition to, the project's Notes tab,
+which is always synced. Task notes are matched back by task id the same way
+project notes are matched by note id, so the two never collide.
 
-Unlike project notes, **task notes sync both ways**: `PluginAPI.updateTask` can
-write back into a task, so an edit made in Joplin gets pulled into the task, and
-an edit made in the task gets pushed to Joplin. To tell which side actually
-changed, the plugin keeps a per-task "last synced content" baseline (stored via
-`persistDataSynced`, so it's shared across your devices, not just this one):
-
-- If only one side moved since that baseline, that side's change wins.
-- If **both** sides changed since the last sync (a real conflict), the more
-  recently edited one wins and silently overwrites the other — there is no
-  merge, and no prompt. If you edit the same task's notes in both apps between
-  syncs, expect to lose one of the two edits.
-- Deleting a task's notes on one side deletes the Joplin note (rather than
-  leaving an empty one); deleting the task entirely removes its Joplin note on
-  the next sync.
+Editing a task's notes in Joplin has no effect — the next sync doesn't read it,
+and won't overwrite your Joplin edit either (it just leaves that note alone
+until the Super Productivity side changes again). See
+[Important limitations](#important-limitations) for why this stays one-way.
 
 ## Packaging
 

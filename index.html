@@ -61,11 +61,10 @@
   <body>
     <h1>Joplin Notes Sync</h1>
     <p class="text-muted">
-      Pushes each Super Productivity project's notes into a matching notebook in your
-      local Joplin app. Project notes are one-way (Super Productivity → Joplin) — the
-      plugin API has no way to write that content back. Optionally, each task's own
-      notes can also sync — those go both ways, so edits in either app reach the other.
-      Desktop only.
+      Pushes each Super Productivity project's notes (and, optionally, each task's own
+      notes) into a matching notebook in your local Joplin app. One-way only (Super
+      Productivity → Joplin) — edits made in Joplin are never written back. Desktop
+      only.
     </p>
 
     <div class="card">
@@ -175,9 +174,6 @@
           if (r.error) parts.push(`error: ${r.error}`);
           return `  • ${r.projectTitle}: ${parts.join(', ') || 'no changes'}`;
         });
-        if (info.totals && info.totals.pulled) {
-          lines.push(`  • ${info.totals.pulled} task note(s) pulled from Joplin`);
-        }
         return `[${when}] (${info.trigger})\n` + lines.join('\n');
       }
 
