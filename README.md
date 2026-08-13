@@ -11,11 +11,15 @@ Joplin notes.
   Productivity, so nothing written in Joplin ever comes back. Treat the notebooks
   these land in as a mirror, not a place to edit.
 - **Task notes, if enabled, are two-way** — see [Task notes](#task-notes-optional)
-  below for how conflicts are resolved. Two-way sync calls `PluginAPI.updateTask` on
-  a schedule, which can in principle race with Super Productivity's own
-  cross-device sync if you run it on more than one device (an earlier version of
-  this plugin reverted to one-way over exactly that risk). If task duplication
-  shows up on a multi-device setup, that's the first thing to suspect.
+  below for how conflicts are resolved. Two-way sync calls `PluginAPI.updateTask`,
+  which can in principle race with Super Productivity's own cross-device sync if you
+  run it on more than one device (an earlier version of this plugin reverted to
+  one-way over exactly that risk). The plugin withholds a pull for a while after a
+  task looks like it just changed, to narrow that window — see
+  [Task notes](#task-notes-optional) for how — but Super Productivity doesn't expose
+  its own sync status to plugins, so this is a heuristic, not a guarantee. If task
+  duplication shows up on a multi-device setup, this race is still the first thing
+  to suspect.
 - **Desktop only.** Joplin's REST API only listens on `127.0.0.1`, which the browser
   sandbox blocks for regular plugin network calls. This plugin instead runs the HTTP
   calls through Super Productivity's `nodeExecution` capability (Electron desktop
@@ -95,6 +99,20 @@ changed, the plugin keeps a per-task "last synced content" baseline (stored via
 - Deleting a task's notes on one side deletes the Joplin note (rather than
   leaving an empty one); deleting the task entirely removes its Joplin note on
   the next sync.
+
+Pulling Joplin's side into a task (the only direction that writes back into Super
+Productivity) is deliberately held back in two situations, both aimed at avoiding
+the race described in [Important limitations](#important-limitations):
+
+- **Settle window.** A pull is withheld until the task hasn't changed on the Super
+  Productivity side for 2 minutes, since a just-touched task is more likely to
+  still be mid-flight through Super Productivity's own sync.
+- **Post-burst cooldown.** Super Productivity's own incoming sync tends to touch
+  many tasks in a tight burst, unlike a human editing one task at a time. Seeing
+  a burst pauses pulls (pushes to Joplin keep working normally) for 60 seconds.
+
+Neither of these is a real signal — Super Productivity doesn't expose sync status
+to plugins — so they narrow the collision window without closing it.
 
 ## Packaging
 

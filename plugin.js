@@ -15,9 +15,13 @@
 // Calling updateTask on a schedule can race with Super Productivity's own
 // cross-device sync (on a multi-device setup, the two can collide on the
 // same task); an earlier version of this plugin reverted to one-way sync
-// over that risk. It's back on the assumption that this races rarely enough
-// in practice to accept — if task duplication reappears on a multi-device
-// setup, that's the first thing to suspect.
+// over that risk. Plugins have no visibility into Super Productivity's own
+// sync state (no hook or getter for "sync in progress"), so this can only
+// be narrowed heuristically, not eliminated: see PULL_SETTLE_MS and
+// noteTaskUpdateForBurstDetection below, both of which only ever gate the
+// pull direction (the only one that calls updateTask) and never delay
+// pushing to Joplin. If task duplication reappears on a multi-device setup,
+// this race is still the first thing to suspect.
 //
 // Reaching Joplin requires Node's http/https modules, which the browser-side
 // PluginAPI.request() cannot use against localhost. This plugin instead runs
@@ -78,6 +82,10 @@ const token = String(input.token || '');
 const parentTitle = String(input.parentNotebookTitle || 'Super Productivity');
 const projects = Array.isArray(input.projects) ? input.projects : [];
 const syncTaskNotes = input.syncTaskNotes === true;
+// Computed in the outer, browser-side plugin code (see performSync and
+// noteTaskUpdateForBurstDetection) — false means a pull just isn't safe to
+// attempt this round, see decideTaskAction's canPull check below.
+const pullsAllowed = input.pullsAllowed !== false;
 
 function apiRequest(method, path, body) {
   return new Promise((resolve, reject) => {
@@ -181,12 +189,20 @@ function stripTaskMarker(body) {
   return String(body || '').replace(TASK_MARKER_RE, '').trim();
 }
 
+// A task that was touched very recently is more likely to still be mid-
+// flight through Super Productivity's own cross-device sync pipeline, which
+// plugins can't observe directly (see the file header). Withholding a pull
+// (the only action that calls updateTask) until a task has been quiet for
+// this long narrows, but can't close, the window where that write could
+// land on top of an incoming remote sync for the same task.
+const PULL_SETTLE_MS = 2 * 60 * 1000;
+
 // Decides what to do with one task's note given its current content on both
 // sides and the content both sides agreed on last sync (item.lastSynced,
 // null if never synced). Only the side that actually moved away from that
 // baseline is treated as "changed"; if both moved, the more recently
 // modified one wins.
-function decideTaskAction(item, existingNote) {
+function decideTaskAction(item, existingNote, ctx) {
   const spContent = item.content;
   if (!existingNote) {
     return spContent === '' ? { action: 'none' } : { action: 'create' };
@@ -201,16 +217,19 @@ function decideTaskAction(item, existingNote) {
   const spChanged = lastSynced === null || spContent !== lastSynced;
   const joplinChanged = lastSynced === null || joplinContent !== lastSynced;
 
+  const canPull =
+    ctx.pullsAllowed && Date.now() - item.spUpdated >= PULL_SETTLE_MS;
+
   if (spChanged && !joplinChanged) {
     return spContent === '' ? { action: 'delete' } : { action: 'update' };
   }
   if (joplinChanged && !spChanged) {
-    return { action: 'pull', content: joplinContent };
+    return canPull ? { action: 'pull', content: joplinContent } : { action: 'none' };
   }
   // Conflict (both changed, or no baseline to compare against): last write wins.
   const joplinUpdated = existingNote.updated_time || 0;
   if (joplinUpdated > item.spUpdated) {
-    return { action: 'pull', content: joplinContent };
+    return canPull ? { action: 'pull', content: joplinContent } : { action: 'none' };
   }
   return spContent === '' ? { action: 'delete' } : { action: 'update' };
 }
@@ -301,7 +320,7 @@ for (const project of projects) {
       for (const item of taskNotes) {
         seenTasks.add(item.id);
         const existing = byTaskId.get(item.id) || null;
-        const decision = decideTaskAction(item, existing);
+        const decision = decideTaskAction(item, existing, { pullsAllowed });
 
         switch (decision.action) {
           case 'create':
@@ -359,6 +378,35 @@ let debounceTimer = null;
 let isSyncing = false;
 let pendingRerun = false;
 let lastSyncInfo = null;
+
+// Heuristic detector for "Super Productivity just ran its own cross-device
+// sync": an incoming remote change tends to touch many tasks in a tight
+// burst, whereas a human editing one task fires ANY_TASK_UPDATE once. On a
+// burst, treat pulling Joplin edits into tasks (the only action that calls
+// updateTask, see PULL_SETTLE_MS in NODE_SYNC_SCRIPT) as unsafe for a
+// cooldown, since that's the highest-risk moment for our write to land on
+// top of Super Productivity's own sync for the same task. This is a
+// heuristic, not a real signal — Super Productivity doesn't expose sync
+// status to plugins — so it narrows the collision window without closing
+// it. Pushing to Joplin is unaffected either way; it never touches Super
+// Productivity's task store, so it can't itself race with anything.
+const SYNC_BURST_WINDOW_MS = 2000;
+const SYNC_BURST_TASK_COUNT = 5;
+const PULL_COOLDOWN_MS = 60000;
+let recentTaskUpdateTimestamps = [];
+let pullsUnsafeUntil = 0;
+
+function noteTaskUpdateForBurstDetection() {
+  const now = Date.now();
+  recentTaskUpdateTimestamps.push(now);
+  recentTaskUpdateTimestamps = recentTaskUpdateTimestamps.filter(
+    (t) => now - t < SYNC_BURST_WINDOW_MS,
+  );
+  if (recentTaskUpdateTimestamps.length >= SYNC_BURST_TASK_COUNT) {
+    pullsUnsafeUntil = now + PULL_COOLDOWN_MS;
+    recentTaskUpdateTimestamps = [];
+  }
+}
 
 function deriveTitle(markdown) {
   const line = String(markdown || '')
@@ -557,6 +605,10 @@ async function performSync(trigger) {
     PluginAPI.showSnack({ msg: 'Syncing notes to Joplin…', type: 'INFO' });
   }
 
+  // See noteTaskUpdateForBurstDetection above: computed once per sync run so
+  // every project's node script call agrees on whether a pull is safe.
+  const pullsAllowed = Date.now() >= pullsUnsafeUntil;
+
   // One executeNodeScript call per project, not one call for everything.
   // Super Productivity's host runs this via `spawn(node, ['-e', wrappedScript])`
   // with the whole script AND the JSON-stringified args embedded in that single
@@ -580,6 +632,7 @@ async function performSync(trigger) {
             parentNotebookTitle: config.parentNotebookTitle,
             projects: [project],
             syncTaskNotes: config.syncTaskNotes,
+            pullsAllowed,
           },
         ],
         timeout: 25000,
@@ -740,6 +793,7 @@ PluginAPI.registerHook(PluginAPI.Hooks.PERSISTED_DATA_CHANGED, () => {
 // Push promptly when a task's notes field changes, instead of waiting for
 // the next interval tick. Ignores unrelated task edits (e.g. time tracking).
 PluginAPI.registerHook(PluginAPI.Hooks.ANY_TASK_UPDATE, (payload) => {
+  noteTaskUpdateForBurstDetection();
   if (payload && payload.changes && Object.prototype.hasOwnProperty.call(payload.changes, 'notes')) {
     scheduleSync(AUTO_SYNC_DEBOUNCE_MS);
   }
