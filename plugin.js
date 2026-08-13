@@ -1,15 +1,27 @@
 // Joplin Notes Sync — pushes each project's notes into a matching Joplin
 // notebook via Joplin's local Web Clipper REST API.
 //
-// One-way only (Super Productivity -> Joplin): the plugin API has no way to
-// write notes back into Super Productivity, so there is nothing to read back.
+// Project notes are one-way only (Super Productivity -> Joplin): the plugin
+// API has no way to write PluginNote content back into Super Productivity.
+//
+// Task notes (opt-in, see syncTaskNotes) ARE two-way: PluginAPI.updateTask
+// can write a task's `notes` field, so edits on either side get reconciled.
+// Since neither side is authoritative, a per-task "last synced content"
+// baseline (persisted via PluginAPI.persistDataSynced, see TASK_SYNC_STATE_KEY)
+// is used to tell which side actually changed since the last sync. If both
+// changed, the more recently modified one wins (last-write-wins by
+// timestamp) and the loser is silently overwritten — there is no merge UI.
 //
 // Reaching Joplin requires Node's http/https modules, which the browser-side
 // PluginAPI.request() cannot use against localhost. This plugin instead runs
 // the Joplin API calls through executeNodeScript (desktop/Electron only,
-// gated by the user's one-time nodeExecution consent prompt).
+// gated by the user's one-time nodeExecution consent prompt). Task pulls
+// (writing Joplin content back into a task) happen in the outer, browser-side
+// plugin code afterwards, since executeNodeScript's child process has no
+// access to PluginAPI.
 
 const TOKEN_SECRET_KEY = 'joplinApiToken';
+const TASK_SYNC_STATE_KEY = 'taskNotesSyncState';
 const AUTO_SYNC_DEBOUNCE_MS = 8000;
 const MIN_INTERVAL_SEC = 15;
 
@@ -138,6 +150,44 @@ async function findOrCreateFolder(title, parentId) {
 const MARKER_RE = /<!--\\s*sp-note-id:([a-zA-Z0-9_-]+)\\s*-->/;
 const TASK_MARKER_RE = /<!--\\s*sp-task-id:([a-zA-Z0-9_-]+)\\s*-->/;
 
+function stripTaskMarker(body) {
+  return String(body || '').replace(TASK_MARKER_RE, '').trim();
+}
+
+// Decides what to do with one task's note given its current content on both
+// sides and the content both sides agreed on last sync (item.lastSynced,
+// null if never synced). Only the side that actually moved away from that
+// baseline is treated as "changed"; if both moved, the more recently
+// modified one wins.
+function decideTaskAction(item, existingNote) {
+  const spContent = item.content;
+  if (!existingNote) {
+    return spContent === '' ? { action: 'none' } : { action: 'create' };
+  }
+
+  const joplinContent = stripTaskMarker(existingNote.body);
+  if (joplinContent === spContent) {
+    return { action: 'none', syncedContent: spContent };
+  }
+
+  const lastSynced = item.lastSynced;
+  const spChanged = lastSynced === null || spContent !== lastSynced;
+  const joplinChanged = lastSynced === null || joplinContent !== lastSynced;
+
+  if (spChanged && !joplinChanged) {
+    return spContent === '' ? { action: 'delete' } : { action: 'update' };
+  }
+  if (joplinChanged && !spChanged) {
+    return { action: 'pull', content: joplinContent };
+  }
+  // Conflict (both changed, or no baseline to compare against): last write wins.
+  const joplinUpdated = existingNote.updated_time || 0;
+  if (joplinUpdated > item.spUpdated) {
+    return { action: 'pull', content: joplinContent };
+  }
+  return spContent === '' ? { action: 'delete' } : { action: 'update' };
+}
+
 let rootFolderId;
 try {
   rootFolderId = await findOrCreateFolder(parentTitle, '');
@@ -155,6 +205,8 @@ for (const project of projects) {
     deleted: 0,
     unchanged: 0,
     error: null,
+    taskNotesSynced: {},
+    taskNotesPulled: [],
   };
   try {
     const folderId = await findOrCreateFolder(project.title, rootFolderId);
@@ -198,20 +250,19 @@ for (const project of projects) {
     }
 
     const taskNotes = Array.isArray(project.taskNotes) ? project.taskNotes : [];
-    // Reconcile the Tasks sub-notebook whenever there's something new to add,
-    // or it already exists (so notes for tasks whose Notes field was cleared,
-    // or that were unassigned/deleted, still get cleaned up). Never create it
-    // just to find it empty, so projects with no task notes stay uncluttered.
-    const tasksFolderId = syncTaskNotes
-      ? taskNotes.length > 0
-        ? await findOrCreateFolder('Tasks', folderId)
-        : await findFolder('Tasks', folderId)
-      : null;
-    if (tasksFolderId) {
-      const existingTaskNotes = await listAll(
-        '/folders/' + tasksFolderId + '/notes',
-        'id,title,body',
-      );
+    // Always look up (never eagerly create) the Tasks sub-notebook when the
+    // feature is on, even if this project's current payload is empty — a
+    // task that gets fully deleted from Super Productivity has no payload
+    // entry at all (it's just absent from the source tasks), so an orphaned
+    // Joplin note for it can only be found by checking the folder itself.
+    // Actual creation stays deferred to the first real 'create' action, so
+    // projects that never use this feature still get no folder.
+    let tasksFolderId = syncTaskNotes ? await findFolder('Tasks', folderId) : null;
+
+    if (syncTaskNotes) {
+      const existingTaskNotes = tasksFolderId
+        ? await listAll('/folders/' + tasksFolderId + '/notes', 'id,title,body,updated_time')
+        : [];
 
       const byTaskId = new Map();
       for (const jn of existingTaskNotes) {
@@ -220,26 +271,43 @@ for (const project of projects) {
       }
 
       const seenTasks = new Set();
-      for (const note of taskNotes) {
-        seenTasks.add(note.id);
-        const existing = byTaskId.get(note.id);
-        if (existing) {
-          if (existing.body !== note.body || existing.title !== note.title) {
+      for (const item of taskNotes) {
+        seenTasks.add(item.id);
+        const existing = byTaskId.get(item.id) || null;
+        const decision = decideTaskAction(item, existing);
+
+        switch (decision.action) {
+          case 'create':
+            if (!tasksFolderId) tasksFolderId = await findOrCreateFolder('Tasks', folderId);
+            await apiRequest('POST', '/notes', {
+              title: item.title,
+              body: item.body,
+              parent_id: tasksFolderId,
+            });
+            projectResult.created += 1;
+            projectResult.taskNotesSynced[item.id] = item.content;
+            break;
+          case 'update':
             await apiRequest('PUT', '/notes/' + existing.id, {
-              title: note.title,
-              body: note.body,
+              title: item.title,
+              body: item.body,
             });
             projectResult.updated += 1;
-          } else {
+            projectResult.taskNotesSynced[item.id] = item.content;
+            break;
+          case 'delete':
+            await apiRequest('DELETE', '/notes/' + existing.id);
+            projectResult.deleted += 1;
+            projectResult.taskNotesSynced[item.id] = '';
+            break;
+          case 'pull':
+            projectResult.taskNotesPulled.push({ taskId: item.id, content: decision.content });
+            break;
+          default:
             projectResult.unchanged += 1;
-          }
-        } else {
-          await apiRequest('POST', '/notes', {
-            title: note.title,
-            body: note.body,
-            parent_id: tasksFolderId,
-          });
-          projectResult.created += 1;
+            if (decision.syncedContent !== undefined) {
+              projectResult.taskNotesSynced[item.id] = decision.syncedContent;
+            }
         }
       }
 
@@ -284,6 +352,26 @@ function buildBody(note) {
 
 function buildTaskBody(task) {
   return `${String(task.notes || '').trimEnd()}\n\n${TASK_MARKER_PREFIX}${task.id}${MARKER_SUFFIX}`;
+}
+
+// The "last synced content" baseline per task id, used to tell which side of
+// a task note actually changed since the last sync (see decideTaskAction in
+// NODE_SYNC_SCRIPT). Persisted via PluginAPI.persistDataSynced so it stays
+// consistent across devices instead of just this one.
+async function loadTaskSyncState() {
+  try {
+    const raw = await PluginAPI.loadSyncedData(TASK_SYNC_STATE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed.tasks === 'object' && parsed.tasks
+      ? parsed
+      : { tasks: {} };
+  } catch (e) {
+    return { tasks: {} };
+  }
+}
+
+async function saveTaskSyncState(state) {
+  await PluginAPI.persistDataSynced(JSON.stringify(state), TASK_SYNC_STATE_KEY);
 }
 
 async function loadEffectiveConfig() {
@@ -366,6 +454,10 @@ async function performSync(trigger) {
   const tasksById = appState.tasks || {};
   const allTasks = Object.values(tasksById);
 
+  const taskSyncState = config.syncTaskNotes
+    ? await loadTaskSyncState()
+    : { tasks: {} };
+
   const payloadProjects = candidateProjects
     .map((p) => {
       const notes = (Array.isArray(p.noteIds) ? p.noteIds : [])
@@ -377,17 +469,30 @@ async function performSync(trigger) {
 
       const taskNotes = config.syncTaskNotes
         ? allTasks
-            .filter(
-              (t) =>
-                t.projectId === p.id &&
-                typeof t.notes === 'string' &&
-                t.notes.trim().length > 0,
-            )
-            .map((t) => ({
-              id: t.id,
-              title: t.title || 'Untitled task',
-              body: buildTaskBody(t),
-            }))
+            .filter((t) => t.projectId === p.id)
+            .map((t) => {
+              const content = typeof t.notes === 'string' ? t.notes.trim() : '';
+              const lastSynced = Object.prototype.hasOwnProperty.call(
+                taskSyncState.tasks,
+                t.id,
+              )
+                ? taskSyncState.tasks[t.id]
+                : null;
+              // Never-synced task with no current content: nothing on either
+              // side could reference it yet (bar someone hand-typing a
+              // marker in Joplin, which we don't try to support), so skip it
+              // to keep the payload proportional to tasks that matter.
+              if (content === '' && lastSynced === null) return null;
+              return {
+                id: t.id,
+                title: t.title || 'Untitled task',
+                content,
+                body: buildTaskBody(t),
+                spUpdated: t.updated || t.created || 0,
+                lastSynced,
+              };
+            })
+            .filter((item) => item !== null)
         : [];
 
       return { id: p.id, title: p.title, notes, taskNotes };
@@ -470,6 +575,39 @@ async function performSync(trigger) {
   }
 
   const results = scriptResult.results || [];
+
+  // Apply any Joplin -> Super Productivity pulls (a task's notes field
+  // changed on the Joplin side and won the sync), then persist the merged
+  // last-synced-content baseline. executeNodeScript's child process has no
+  // PluginAPI access, so this — and the state save — only happens here.
+  let pulled = 0;
+  const pullErrors = [];
+  if (config.syncTaskNotes) {
+    const newState = { tasks: { ...taskSyncState.tasks } };
+    for (const r of results) {
+      Object.assign(newState.tasks, r.taskNotesSynced || {});
+    }
+    for (const r of results) {
+      for (const pull of r.taskNotesPulled || []) {
+        try {
+          await PluginAPI.updateTask(pull.taskId, { notes: pull.content });
+          newState.tasks[pull.taskId] = pull.content;
+          pulled += 1;
+        } catch (e) {
+          pullErrors.push(
+            r.projectTitle + ': failed to pull a task note (' + (e.message || e) + ')',
+          );
+        }
+      }
+    }
+    // Drop entries for tasks that no longer exist, so the synced blob
+    // doesn't grow without bound.
+    for (const taskId of Object.keys(newState.tasks)) {
+      if (!tasksById[taskId]) delete newState.tasks[taskId];
+    }
+    await saveTaskSyncState(newState);
+  }
+
   const totals = results.reduce(
     (acc, r) => {
       acc.created += r.created || 0;
@@ -478,8 +616,10 @@ async function performSync(trigger) {
       if (r.error) acc.errors.push(r.projectTitle + ': ' + r.error);
       return acc;
     },
-    { created: 0, updated: 0, deleted: 0, errors: [] },
+    { created: 0, updated: 0, deleted: 0, pulled: 0, errors: [] },
   );
+  totals.pulled = pulled;
+  totals.errors.push(...pullErrors);
 
   lastSyncInfo = {
     at: Date.now(),
@@ -495,7 +635,7 @@ async function performSync(trigger) {
         msg: 'Joplin sync finished with errors: ' + totals.errors.join('; '),
         type: 'ERROR',
       });
-    } else if (totals.created + totals.updated + totals.deleted === 0) {
+    } else if (totals.created + totals.updated + totals.deleted + totals.pulled === 0) {
       PluginAPI.showSnack({ msg: 'Joplin sync: already up to date.', type: 'SUCCESS' });
     } else {
       PluginAPI.showSnack({
@@ -506,7 +646,9 @@ async function performSync(trigger) {
           totals.updated +
           ' updated, ' +
           totals.deleted +
-          ' deleted.',
+          ' deleted' +
+          (totals.pulled > 0 ? ', ' + totals.pulled + ' pulled from Joplin' : '') +
+          '.',
         type: 'SUCCESS',
       });
     }
@@ -543,6 +685,14 @@ PluginAPI.registerHeaderButton({
 PluginAPI.registerHook(PluginAPI.Hooks.PERSISTED_DATA_CHANGED, () => {
   reloadIntervalFromConfig();
   scheduleSync(AUTO_SYNC_DEBOUNCE_MS);
+});
+
+// Push promptly when a task's notes field changes, instead of waiting for
+// the next interval tick. Ignores unrelated task edits (e.g. time tracking).
+PluginAPI.registerHook(PluginAPI.Hooks.ANY_TASK_UPDATE, (payload) => {
+  if (payload && payload.changes && Object.prototype.hasOwnProperty.call(payload.changes, 'notes')) {
+    scheduleSync(AUTO_SYNC_DEBOUNCE_MS);
+  }
 });
 
 if (PluginAPI.onMessage) {
