@@ -413,73 +413,68 @@ async function performSync(trigger) {
     PluginAPI.showSnack({ msg: 'Syncing notes to Joplin…', type: 'INFO' });
   }
 
-  let outcome;
-  try {
-    outcome = await PluginAPI.executeNodeScript({
-      script: NODE_SYNC_SCRIPT,
-      args: [
-        {
-          baseUrl: config.joplinUrl,
-          token,
-          parentNotebookTitle: config.parentNotebookTitle,
-          projects: payloadProjects,
-          syncTaskNotes: config.syncTaskNotes,
-        },
-      ],
-      timeout: 25000,
-    });
-  } catch (e) {
-    lastSyncInfo = {
-      at: Date.now(),
-      trigger,
-      success: false,
-      error: e.message || String(e),
-    };
-    if (trigger === 'manual') {
-      PluginAPI.showSnack({
-        msg: 'Joplin sync failed: ' + lastSyncInfo.error,
-        type: 'ERROR',
+  // One executeNodeScript call per project, not one call for everything.
+  // Super Productivity's host runs this via `spawn(node, ['-e', wrappedScript])`
+  // with the whole script AND the JSON-stringified args embedded in that single
+  // command-line argument (see electron/plugin-node-executor.ts upstream) — on
+  // Windows that has a much lower effective length limit than Linux/macOS, and
+  // there's no size cap on args there (only the script text is capped at
+  // 100KB), so a large combined notes payload fails with "spawn ENAMETOOLONG".
+  // Keeping each call to a single project's data keeps every command line
+  // small regardless of how much is synced overall.
+  const results = [];
+  let hardFailure = null;
+  for (const project of payloadProjects) {
+    let outcome;
+    try {
+      outcome = await PluginAPI.executeNodeScript({
+        script: NODE_SYNC_SCRIPT,
+        args: [
+          {
+            baseUrl: config.joplinUrl,
+            token,
+            parentNotebookTitle: config.parentNotebookTitle,
+            projects: [project],
+            syncTaskNotes: config.syncTaskNotes,
+          },
+        ],
+        timeout: 25000,
       });
+    } catch (e) {
+      hardFailure = e.message || String(e);
+      break;
     }
-    return lastSyncInfo;
+
+    if (!outcome || !outcome.success) {
+      const errCode =
+        outcome && outcome.error && typeof outcome.error === 'object'
+          ? outcome.error.code
+          : null;
+      hardFailure =
+        errCode === 'NO_CONSENT' || errCode === 'PERMISSION_DENIED'
+          ? 'Node execution permission was not granted. Enable it for this plugin in Settings → Plugins.'
+          : (outcome && outcome.error && outcome.error.message) ||
+            (outcome && outcome.error) ||
+            'Unknown error';
+      break;
+    }
+
+    const scriptResult = outcome.result || {};
+    if (!scriptResult.success) {
+      hardFailure = scriptResult.error || 'Unknown error';
+      break;
+    }
+
+    results.push(...(scriptResult.results || []));
   }
 
-  if (!outcome || !outcome.success) {
-    const errCode =
-      outcome && outcome.error && typeof outcome.error === 'object'
-        ? outcome.error.code
-        : null;
-    const errMsg =
-      errCode === 'NO_CONSENT' || errCode === 'PERMISSION_DENIED'
-        ? 'Node execution permission was not granted. Enable it for this plugin in Settings → Plugins.'
-        : (outcome && outcome.error && outcome.error.message) ||
-          (outcome && outcome.error) ||
-          'Unknown error';
-    lastSyncInfo = { at: Date.now(), trigger, success: false, error: errMsg };
+  if (hardFailure) {
+    lastSyncInfo = { at: Date.now(), trigger, success: false, error: hardFailure };
     if (trigger === 'manual') {
-      PluginAPI.showSnack({ msg: 'Joplin sync failed: ' + errMsg, type: 'ERROR' });
+      PluginAPI.showSnack({ msg: 'Joplin sync failed: ' + hardFailure, type: 'ERROR' });
     }
     return lastSyncInfo;
   }
-
-  const scriptResult = outcome.result || {};
-  if (!scriptResult.success) {
-    lastSyncInfo = {
-      at: Date.now(),
-      trigger,
-      success: false,
-      error: scriptResult.error || 'Unknown error',
-    };
-    if (trigger === 'manual') {
-      PluginAPI.showSnack({
-        msg: 'Joplin sync failed: ' + lastSyncInfo.error,
-        type: 'ERROR',
-      });
-    }
-    return lastSyncInfo;
-  }
-
-  const results = scriptResult.results || [];
   const totals = results.reduce(
     (acc, r) => {
       acc.created += r.created || 0;

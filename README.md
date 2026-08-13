@@ -19,7 +19,12 @@ Joplin notes.
 - **Desktop only.** Joplin's REST API only listens on `127.0.0.1`, which the browser
   sandbox blocks for regular plugin network calls. This plugin instead runs the HTTP
   calls through Super Productivity's `nodeExecution` capability (Electron desktop
-  app only), which requires a one-time consent prompt the first time it runs.
+  app only), which requires a one-time consent prompt the first time it runs. That
+  capability spawns a Node process by passing the whole script and all its data as a
+  single command-line argument, which has a much lower effective length limit on
+  Windows than on Linux/macOS — the plugin works around this by syncing one project
+  per call (see the comment above `NODE_SYNC_SCRIPT` in `plugin.js`), but a single
+  project with a very large amount of note content could theoretically still hit it.
 - **The plugin fully manages the target notebooks.** A note deleted in a Super
   Productivity project is deleted from the corresponding Joplin notebook on the next
   sync. Don't keep manually-created notes inside the notebooks this plugin creates.
