@@ -722,7 +722,11 @@ async function runSync(trigger) {
 
 PluginAPI.registerHeaderButton({
   label: 'Joplin Sync',
-  icon: 'sync',
+  // Header buttons render via <mat-icon>{{icon}}</mat-icon> — only a Material
+  // Symbols ligature name from Super Productivity's built-in icon font, no
+  // custom SVG. 'refresh' (single rotating arrow) is the closest built-in
+  // match to icon.svg's ring; there's no way to also show the "J" here.
+  icon: 'refresh',
   onClick: () => {
     runSync('manual');
   },
