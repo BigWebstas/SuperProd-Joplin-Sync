@@ -40,6 +40,21 @@ const MARKER_PREFIX = '<!-- sp-note-id:';
 const TASK_MARKER_PREFIX = '<!-- sp-task-id:';
 const MARKER_SUFFIX = ' -->';
 
+// Calendar-imported tasks (Super Productivity's Google/ICS calendar
+// integration) get one task id per event *occurrence*, e.g.
+// "cal_<uid>@google.com_2026-08-13T09:30:00" — the trailing timestamp is
+// that day's start time, so a daily recurring event mints a brand-new task
+// id every day even though it's "the same" task to the user. Keying the
+// Joplin note on the raw id would then create a fresh note every occurrence
+// instead of updating one. Stripping the trailing occurrence timestamp
+// collapses all occurrences of the same calendar event onto a single,
+// stable sync key.
+const CALENDAR_OCCURRENCE_SUFFIX_RE = /_\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?$/;
+
+function normalizeTaskId(id) {
+  return String(id).replace(CALENDAR_OCCURRENCE_SUFFIX_RE, '');
+}
+
 // Executed inside a plain Node.js process via PluginAPI.executeNodeScript.
 // Kept dependency-free (only Node built-ins) since the sandbox only allows
 // fs/path/os via `require` for trivial scripts — anything else (like this)
@@ -292,8 +307,8 @@ function buildBody(note) {
   return `${String(note.content || '').trimEnd()}\n\n${MARKER_PREFIX}${note.id}${MARKER_SUFFIX}`;
 }
 
-function buildTaskBody(task) {
-  return `${String(task.notes || '').trimEnd()}\n\n${TASK_MARKER_PREFIX}${task.id}${MARKER_SUFFIX}`;
+function buildTaskBody(task, syncId) {
+  return `${String(task.notes || '').trimEnd()}\n\n${TASK_MARKER_PREFIX}${syncId}${MARKER_SUFFIX}`;
 }
 
 async function loadEffectiveConfig() {
@@ -393,11 +408,14 @@ async function performSync(trigger) {
                 typeof t.notes === 'string' &&
                 t.notes.trim().length > 0,
             )
-            .map((t) => ({
-              id: t.id,
-              title: t.title || 'Untitled task',
-              body: buildTaskBody(t),
-            }))
+            .map((t) => {
+              const syncId = normalizeTaskId(t.id);
+              return {
+                id: syncId,
+                title: t.title || 'Untitled task',
+                body: buildTaskBody(t, syncId),
+              };
+            })
         : [];
 
       return { id: p.id, title: p.title, notes, taskNotes };
