@@ -14,8 +14,8 @@ API. Plain files, no build step, no dependencies, no test suite.
   Keep `version` here in sync with `package.json`.
 - `config-schema.json` — JSON Schema for the non-secret settings shown under
   Settings → Plugins → Joplin Notes Sync (Joplin URL, parent notebook, sync
-  interval, task-notes toggle). The API token is deliberately NOT here — it's a
-  secret set from the plugin's own page.
+  interval, task-notes toggle, archive-removed-notes toggle). The API token is
+  deliberately NOT here — it's a secret set from the plugin's own page.
 - `plugin.js` — all plugin logic (see Architecture below). One file, ~930 lines.
 - `index.html` — the plugin's iframe UI (token entry, settings summary, manual
   sync button, status). Communicates with `plugin.js` purely via
@@ -130,6 +130,22 @@ pull direction (pushing to Joplin is never delayed):
 
 If task duplication reappears on a multi-device setup, this race is the first
 thing to suspect (see the comment block at the top of `plugin.js`).
+
+### Archiving instead of deleting
+
+`archiveRemovedNotes` (config option, default off) changes what happens at every
+point `NODE_SYNC_SCRIPT` would otherwise `DELETE` a Joplin note: the orphan
+sweeps for project notes and task notes, and `decideTaskAction`'s `'delete'`
+case (a task's notes field cleared to empty). All three route through the
+shared `removeOrArchive(joplinNoteId, parentId)` helper, which instead moves
+the note into an `Archive` sub-notebook under `parentId` (memoized per-parent
+via `getArchiveFolderId` so repeated archives in one run don't each call
+`findOrCreateFolder`). An archived note falls outside the folder that
+`byNoteId`/`byTaskId` are built from on the next sync, so it's never matched or
+reconsidered again — if the same SP note/task id resurfaces later, it creates a
+fresh Joplin note rather than reviving the archived one. `projectResult.archived`
+is tracked separately from `.deleted` and flows through `totals` to both the
+manual-sync snack and `index.html`'s status display.
 
 ### Recurring calendar tasks
 

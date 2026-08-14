@@ -171,6 +171,7 @@
           if (r.created) parts.push(`${r.created} created`);
           if (r.updated) parts.push(`${r.updated} updated`);
           if (r.deleted) parts.push(`${r.deleted} deleted`);
+          if (r.archived) parts.push(`${r.archived} archived`);
           if (r.unchanged) parts.push(`${r.unchanged} unchanged`);
           if (r.error) parts.push(`error: ${r.error}`);
           return `  • ${r.projectTitle}: ${parts.join(', ') || 'no changes'}`;
@@ -200,7 +201,8 @@
                 ? state.config.syncIntervalSec + 's'
                 : 'disabled'
             }\n` +
-            `Sync task notes: ${state.config.syncTaskNotes ? 'on' : 'off'}`;
+            `Sync task notes: ${state.config.syncTaskNotes ? 'on' : 'off'}\n` +
+            `Archive removed notes: ${state.config.archiveRemovedNotes ? 'on' : 'off'}`;
           document.getElementById('status').textContent = formatSyncInfo(
             state.lastSyncInfo,
           );

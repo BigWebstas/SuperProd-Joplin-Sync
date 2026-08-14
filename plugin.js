@@ -41,6 +41,7 @@ const DEFAULTS = {
   parentNotebookTitle: 'Super Productivity',
   syncIntervalSec: 60,
   syncTaskNotes: false,
+  archiveRemovedNotes: false,
 };
 
 // Matches sp-note-id / sp-task-id markers written into a note body (see
@@ -86,6 +87,13 @@ const syncTaskNotes = input.syncTaskNotes === true;
 // noteTaskUpdateForBurstDetection) — false means a pull just isn't safe to
 // attempt this round, see decideTaskAction's canPull check below.
 const pullsAllowed = input.pullsAllowed !== false;
+// When true, a Joplin note that would otherwise be deleted (because its
+// source note/task no longer exists, or a task's notes field was cleared) is
+// instead moved into an "Archive" sub-notebook alongside its live siblings.
+// An archived note is no longer listed under its original folder, so it
+// drops out of byNoteId/byTaskId on the next sync and is never reconsidered
+// — archiving is a one-way move, not a tracked state.
+const archiveRemovedNotes = input.archiveRemovedNotes === true;
 
 function apiRequest(method, path, body) {
   return new Promise((resolve, reject) => {
@@ -177,6 +185,30 @@ async function findOrCreateFolder(title, parentId) {
   return created.id;
 }
 
+// Memoizes the "Archive" folder id per parent within a single script run, so
+// several archived notes under the same project/Tasks folder only trigger one
+// findOrCreateFolder call instead of one each.
+const archiveFolderIdByParent = new Map();
+async function getArchiveFolderId(parentId) {
+  if (archiveFolderIdByParent.has(parentId)) return archiveFolderIdByParent.get(parentId);
+  const id = await findOrCreateFolder('Archive', parentId);
+  archiveFolderIdByParent.set(parentId, id);
+  return id;
+}
+
+// Either deletes a Joplin note or, if archiveRemovedNotes is on, moves it into
+// an "Archive" sub-notebook under parentId instead. Returns true if archived,
+// false if deleted, so callers can bucket the result into the right counter.
+async function removeOrArchive(joplinNoteId, parentId) {
+  if (archiveRemovedNotes) {
+    const archiveFolderId = await getArchiveFolderId(parentId);
+    await apiRequest('PUT', '/notes/' + joplinNoteId, { parent_id: archiveFolderId });
+    return true;
+  }
+  await apiRequest('DELETE', '/notes/' + joplinNoteId);
+  return false;
+}
+
 // Ids are opaque, whitespace-free tokens, so match anything up to the
 // trailing space + "-->" rather than an alphanumeric allowlist — calendar-
 // imported task ids contain "@" and "." (e.g. "...@google.com"), which an
@@ -252,6 +284,7 @@ for (const project of projects) {
     created: 0,
     updated: 0,
     deleted: 0,
+    archived: 0,
     unchanged: 0,
     error: null,
     taskNotesSynced: {},
@@ -301,8 +334,9 @@ for (const project of projects) {
       const validNoteIds = new Set(project.noteValidIds);
       for (const [spNoteId, jn] of byNoteId.entries()) {
         if (!validNoteIds.has(spNoteId)) {
-          await apiRequest('DELETE', '/notes/' + jn.id);
-          projectResult.deleted += 1;
+          const archived = await removeOrArchive(jn.id, folderId);
+          if (archived) projectResult.archived += 1;
+          else projectResult.deleted += 1;
         }
       }
     }
@@ -359,11 +393,13 @@ for (const project of projects) {
             projectResult.updated += 1;
             projectResult.taskNotesSynced[item.id] = spContent;
             break;
-          case 'delete':
-            await apiRequest('DELETE', '/notes/' + existing.id);
-            projectResult.deleted += 1;
+          case 'delete': {
+            const archived = await removeOrArchive(existing.id, tasksFolderId);
+            if (archived) projectResult.archived += 1;
+            else projectResult.deleted += 1;
             projectResult.taskNotesSynced[item.id] = '';
             break;
+          }
           case 'pull':
             if (titleStale) {
               await apiRequest('PUT', '/notes/' + existing.id, { title: item.title });
@@ -390,8 +426,9 @@ for (const project of projects) {
         const validTaskIds = new Set(project.taskValidIds);
         for (const [taskId, jn] of byTaskId.entries()) {
           if (!validTaskIds.has(taskId)) {
-            await apiRequest('DELETE', '/notes/' + jn.id);
-            projectResult.deleted += 1;
+            const archived = await removeOrArchive(jn.id, tasksFolderId);
+            if (archived) projectResult.archived += 1;
+            else projectResult.deleted += 1;
           }
         }
       }
@@ -525,6 +562,7 @@ async function loadEffectiveConfig() {
       ? cfg.syncIntervalSec
       : DEFAULTS.syncIntervalSec,
     syncTaskNotes: cfg.syncTaskNotes === true,
+    archiveRemovedNotes: cfg.archiveRemovedNotes === true,
   };
 }
 
@@ -723,6 +761,7 @@ async function performSync(trigger) {
               projects: [projectChunk],
               syncTaskNotes: config.syncTaskNotes,
               pullsAllowed,
+              archiveRemovedNotes: config.archiveRemovedNotes,
             },
           ],
           timeout: 25000,
@@ -803,10 +842,11 @@ async function performSync(trigger) {
       acc.created += r.created || 0;
       acc.updated += r.updated || 0;
       acc.deleted += r.deleted || 0;
+      acc.archived += r.archived || 0;
       if (r.error) acc.errors.push(r.projectTitle + ': ' + r.error);
       return acc;
     },
-    { created: 0, updated: 0, deleted: 0, pulled: 0, errors: [] },
+    { created: 0, updated: 0, deleted: 0, archived: 0, pulled: 0, errors: [] },
   );
   totals.pulled = pulled;
   totals.errors.push(...pullErrors);
@@ -825,7 +865,10 @@ async function performSync(trigger) {
         msg: 'Joplin sync finished with errors: ' + totals.errors.join('; '),
         type: 'ERROR',
       });
-    } else if (totals.created + totals.updated + totals.deleted + totals.pulled === 0) {
+    } else if (
+      totals.created + totals.updated + totals.deleted + totals.archived + totals.pulled ===
+      0
+    ) {
       PluginAPI.showSnack({ msg: 'Joplin sync: already up to date.', type: 'SUCCESS' });
     } else {
       PluginAPI.showSnack({
@@ -837,6 +880,7 @@ async function performSync(trigger) {
           ' updated, ' +
           totals.deleted +
           ' deleted' +
+          (totals.archived > 0 ? ', ' + totals.archived + ' archived' : '') +
           (totals.pulled > 0 ? ', ' + totals.pulled + ' pulled from Joplin' : '') +
           '.',
         type: 'SUCCESS',

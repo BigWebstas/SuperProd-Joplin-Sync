@@ -33,7 +33,9 @@ Joplin notes.
   `NODE_SYNC_SCRIPT` in `plugin.js`).
 - **The plugin fully manages the target notebooks.** A note deleted in a Super
   Productivity project is deleted from the corresponding Joplin notebook on the next
-  sync. Don't keep manually-created notes inside the notebooks this plugin creates.
+  sync (or, if **Archive removed notes** is enabled, moved into an `Archive`
+  sub-notebook instead — see [Notebook layout](#notebook-layout)). Don't keep
+  manually-created notes inside the notebooks this plugin creates.
 - Only **active (non-archived) projects that have at least one note** are synced.
 
 ## Setup
@@ -44,8 +46,9 @@ Joplin notes.
    pointing at a zip of this folder), then open it from the app menu.
 3. Paste the token under "1. Joplin API token" and save. The token is stored as a
    local secret on this device only (never synced, exported, or backed up).
-4. Optionally adjust the Joplin URL, parent notebook name, auto-sync interval, or
-   whether task notes are synced, under **Settings → Plugins → Joplin Notes Sync**.
+4. Optionally adjust the Joplin URL, parent notebook name, auto-sync interval,
+   whether task notes are synced, or whether removed notes are archived instead of
+   deleted, under **Settings → Plugins → Joplin Notes Sync**.
 5. Grant the Node execution permission when prompted, either via the "Sync Now"
    button on the plugin page or the header "Joplin Sync" button.
 
@@ -64,13 +67,28 @@ plugin reinstalls and doesn't depend on any local cache.
   └── <project title>
         ├── <note 1 title>
         ├── <note 2 title>
+        ├── Archive/                   (only if "Archive removed notes" is enabled)
+        │     └── <removed note title>
         └── Tasks/                     (only if "Sync task notes" is enabled)
               ├── <task 1 title>
-              └── <task 2 title>
+              ├── <task 2 title>
+              └── Archive/              (only if "Archive removed notes" is enabled)
+                    └── <removed task note title>
 ```
 
 Note titles are derived from the first non-empty line of the note's markdown
 content (headings/list markers stripped, truncated to 80 characters).
+
+### Archiving removed notes (optional)
+
+By default, a note (or task note) whose source no longer exists in Super
+Productivity is deleted from Joplin on the next sync. Enabling **Archive removed
+notes** moves it into an `Archive` sub-notebook instead (under the project for
+project notes, under `Tasks` for task notes) rather than deleting it. This also
+applies when a task's notes field is cleared out with two-way task-notes sync on.
+An archived note keeps its `sp-note-id`/`sp-task-id` marker but is no longer
+matched against Super Productivity on future syncs — if the same note or task
+reappears, it gets a brand-new Joplin note rather than reviving the archived one.
 
 ### Task notes (optional)
 
