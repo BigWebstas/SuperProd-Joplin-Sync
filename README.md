@@ -145,3 +145,18 @@ to plugins — so they narrow the collision window without closing it.
 This plugin ships as plain files (no build step). To install it, zip the contents
 of this folder (`manifest.json`, `config-schema.json`, `plugin.js`, `index.html`,
 `icon.svg`) and upload the zip via **Settings → Plugins → Upload Plugin**.
+
+## Changelog
+
+Full release notes and downloadable zips: [GitHub Releases](https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases).
+
+- **v1.4.0** — Option to archive removed notes into an `Archive` sub-notebook instead of deleting them.
+- **v1.3.0** — Completed tasks get a `[Done] ` prefix on their Joplin note title (task notes sync only).
+- **v1.2.2** — Fix: `spawn ENAMETOOLONG` recurring on Windows once task notes grew large; payloads are now chunked per project instead of assumed to fit in one call.
+- **v1.2.1** — Task notes sync two-way again, with heuristic mitigations for the multi-device task-duplication race; new plugin icon.
+- **v1.1.5** — Fix: recurring calendar-imported tasks no longer duplicate their Joplin note on every occurrence.
+- **v1.1.3** — Maintenance only (add `.idea/` to `.gitignore`); no functional changes.
+- **v1.1.2** — Fix: `spawn ENAMETOOLONG` on Windows; one `executeNodeScript` call per project instead of one for everything.
+- **v1.1.1** — Fix: task notes duplicating tasks on multi-device setups; reverted task notes to one-way pending a proper fix.
+- **v1.1.0** — Task notes: optional two-way sync of each task's own Notes field into a `Tasks` sub-notebook.
+- **v1.0.0** — Initial release: one-way sync of project notes into Joplin notebooks.
