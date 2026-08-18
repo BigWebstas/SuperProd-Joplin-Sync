@@ -4,13 +4,16 @@
 // Project notes are one-way only (Super Productivity -> Joplin): the plugin
 // API has no way to write PluginNote content back into Super Productivity.
 //
-// Task notes (opt-in, see syncTaskNotes) ARE two-way: PluginAPI.updateTask
-// can write a task's `notes` field, so edits on either side get reconciled.
-// Since neither side is authoritative, a per-task "last synced content"
-// baseline (persisted via PluginAPI.persistDataSynced, see TASK_SYNC_STATE_KEY)
-// is used to tell which side actually changed since the last sync. If both
-// changed, the more recently modified one wins (last-write-wins by
-// timestamp) and the loser is silently overwritten — there is no merge UI.
+// Task notes (opt-in, see syncTaskNotes) are two-way by default: PluginAPI.
+// updateTask can write a task's `notes` field, so edits on either side get
+// reconciled. Since neither side is authoritative, a per-task "last synced
+// content" baseline (persisted via PluginAPI.persistDataSynced, see
+// TASK_SYNC_STATE_KEY) is used to tell which side actually changed since the
+// last sync. If both changed, the more recently modified one wins
+// (last-write-wins by timestamp) and the loser is silently overwritten —
+// there is no merge UI. Setting taskNotesOneWay makes task notes one-way
+// (Super Productivity -> Joplin only) instead, same as project notes: Joplin
+// edits are never pulled and get overwritten on the next sync.
 //
 // Calling updateTask on a schedule can race with Super Productivity's own
 // cross-device sync (on a multi-device setup, the two can collide on the
@@ -41,6 +44,7 @@ const DEFAULTS = {
   parentNotebookTitle: 'Super Productivity',
   syncIntervalSec: 60,
   syncTaskNotes: false,
+  taskNotesOneWay: false,
   archiveRemovedNotes: false,
 };
 
@@ -83,6 +87,11 @@ const token = String(input.token || '');
 const parentTitle = String(input.parentNotebookTitle || 'Super Productivity');
 const projects = Array.isArray(input.projects) ? input.projects : [];
 const syncTaskNotes = input.syncTaskNotes === true;
+// When true, task notes behave like project notes: Super Productivity is the
+// only source of truth, Joplin-side edits are never pulled, and a content
+// mismatch always gets overwritten with the Super Productivity side on the
+// next sync (see decideTaskAction below).
+const taskNotesOneWay = input.taskNotesOneWay === true;
 // Computed in the outer, browser-side plugin code (see performSync and
 // noteTaskUpdateForBurstDetection) — false means a pull just isn't safe to
 // attempt this round, see decideTaskAction's canPull check below.
@@ -248,6 +257,13 @@ function decideTaskAction(item, existingNote, ctx) {
     return { action: 'none', syncedContent: spContent };
   }
 
+  // One-way: Super Productivity always wins, immediately, regardless of who
+  // changed what or when — no baseline comparison, no pull, no conflict
+  // resolution, same as how project notes are handled above.
+  if (ctx.oneWay) {
+    return spContent === '' ? { action: 'delete' } : { action: 'update' };
+  }
+
   const lastSynced = item.lastSynced;
   const spChanged = lastSynced === null || spContent !== lastSynced;
   const joplinChanged = lastSynced === null || joplinContent !== lastSynced;
@@ -364,7 +380,7 @@ for (const project of projects) {
 
       for (const item of taskNotes) {
         const existing = byTaskId.get(item.id) || null;
-        const decision = decideTaskAction(item, existing, { pullsAllowed });
+        const decision = decideTaskAction(item, existing, { pullsAllowed, oneWay: taskNotesOneWay });
         const spContent = stripTaskMarker(item.body);
         // The title (e.g. a "[Done]" prefix toggling when a task is
         // completed) is SP-driven and one-way, independent of the two-way
@@ -562,6 +578,7 @@ async function loadEffectiveConfig() {
       ? cfg.syncIntervalSec
       : DEFAULTS.syncIntervalSec,
     syncTaskNotes: cfg.syncTaskNotes === true,
+    taskNotesOneWay: cfg.taskNotesOneWay === true,
     archiveRemovedNotes: cfg.archiveRemovedNotes === true,
   };
 }
@@ -760,6 +777,7 @@ async function performSync(trigger) {
               parentNotebookTitle: config.parentNotebookTitle,
               projects: [projectChunk],
               syncTaskNotes: config.syncTaskNotes,
+              taskNotesOneWay: config.taskNotesOneWay,
               pullsAllowed,
               archiveRemovedNotes: config.archiveRemovedNotes,
             },

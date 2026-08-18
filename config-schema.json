@@ -26,8 +26,14 @@
     },
     "syncTaskNotes": {
       "type": "boolean",
-      "title": "Sync task notes (two-way)",
-      "description": "Two-way sync of each task's own Notes field (opened from the task itself) with a \"Tasks\" sub-notebook under the project — edits in either app get pushed to the other. If a task's notes changed in both places since the last sync, the more recently edited side wins and overwrites the other. Separate from the project's Notes tab, which is always synced one-way.",
+      "title": "Sync task notes",
+      "description": "Sync each task's own Notes field (opened from the task itself) with a \"Tasks\" sub-notebook under the project. Two-way by default — edits in either app get pushed to the other, and if a task's notes changed in both places since the last sync, the more recently edited side wins. Enable \"One-way task notes\" below to make Super Productivity the only source of truth instead. Separate from the project's Notes tab, which is always synced one-way.",
+      "default": false
+    },
+    "taskNotesOneWay": {
+      "type": "boolean",
+      "title": "One-way task notes (Super Productivity → Joplin)",
+      "description": "Only takes effect when \"Sync task notes\" is on. Makes task notes one-way, like project notes: edits made directly in Joplin are never pulled back into Super Productivity and get overwritten by Super Productivity's content on the next sync.",
       "default": false
     },
     "archiveRemovedNotes": {

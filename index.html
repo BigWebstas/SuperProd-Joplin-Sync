@@ -64,7 +64,8 @@
       Pushes each Super Productivity project's notes into a matching notebook in your
       local Joplin app. Project notes are one-way (Super Productivity → Joplin) — the
       plugin API has no way to write that content back. Optionally, each task's own
-      notes can also sync — those go both ways, so edits in either app reach the other.
+      notes can also sync — two-way by default (edits in either app reach the other),
+      or one-way like project notes if you'd rather Super Productivity always win.
       Desktop only.
     </p>
 
@@ -201,7 +202,13 @@
                 ? state.config.syncIntervalSec + 's'
                 : 'disabled'
             }\n` +
-            `Sync task notes: ${state.config.syncTaskNotes ? 'on' : 'off'}\n` +
+            `Sync task notes: ${
+              state.config.syncTaskNotes
+                ? state.config.taskNotesOneWay
+                  ? 'on (one-way)'
+                  : 'on (two-way)'
+                : 'off'
+            }\n` +
             `Archive removed notes: ${state.config.archiveRemovedNotes ? 'on' : 'off'}`;
           document.getElementById('status').textContent = formatSyncInfo(
             state.lastSyncInfo,
