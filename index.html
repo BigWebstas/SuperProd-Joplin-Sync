@@ -209,6 +209,9 @@
                   : 'on (two-way)'
                 : 'off'
             }\n` +
+            `Sync task tags: ${
+              state.config.syncTaskNotes && state.config.syncTaskTags ? 'on' : 'off'
+            }\n` +
             `Archive removed notes: ${state.config.archiveRemovedNotes ? 'on' : 'off'}`;
           document.getElementById('status').textContent = formatSyncInfo(
             state.lastSyncInfo,

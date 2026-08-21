@@ -15,6 +15,12 @@
 // (Super Productivity -> Joplin only) instead, same as project notes: Joplin
 // edits are never pulled and get overwritten on the next sync.
 //
+// Task tags (opt-in via syncTaskTags, only takes effect alongside
+// syncTaskNotes) are one-way (Super Productivity -> Joplin) only, applied as
+// Joplin tags on the same per-task note: there's nowhere in Super
+// Productivity to write a Joplin-side tag change back to, so unlike task
+// note content there's no pull direction or conflict to resolve here.
+//
 // Calling updateTask on a schedule can race with Super Productivity's own
 // cross-device sync (on a multi-device setup, the two can collide on the
 // same task); an earlier version of this plugin reverted to one-way sync
@@ -45,6 +51,7 @@ const DEFAULTS = {
   syncIntervalSec: 60,
   syncTaskNotes: false,
   taskNotesOneWay: false,
+  syncTaskTags: false,
   archiveRemovedNotes: false,
 };
 
@@ -92,6 +99,10 @@ const syncTaskNotes = input.syncTaskNotes === true;
 // mismatch always gets overwritten with the Super Productivity side on the
 // next sync (see decideTaskAction below).
 const taskNotesOneWay = input.taskNotesOneWay === true;
+// One-way (SP -> Joplin) sync of each task's SP tags onto its Joplin note's
+// tags, see syncNoteTags below. Only meaningful when syncTaskNotes is also
+// on, since that's what creates/matches the per-task Joplin note to tag.
+const syncTaskTags = input.syncTaskTags === true && syncTaskNotes;
 // Computed in the outer, browser-side plugin code (see performSync and
 // noteTaskUpdateForBurstDetection) — false means a pull just isn't safe to
 // attempt this round, see decideTaskAction's canPull check below.
@@ -216,6 +227,58 @@ async function removeOrArchive(joplinNoteId, parentId) {
   }
   await apiRequest('DELETE', '/notes/' + joplinNoteId);
   return false;
+}
+
+// Memoizes Joplin tag id lookups by title within a single script run, so
+// several tasks sharing a tag only trigger one GET /tags (to seed the cache)
+// and, for a genuinely new tag, one POST /tags rather than one lookup each.
+let tagIdByTitle = null;
+async function ensureTagsLoaded() {
+  if (tagIdByTitle) return;
+  tagIdByTitle = new Map();
+  const tags = await listAll('/tags', 'id,title');
+  for (const t of tags) tagIdByTitle.set(t.title, t.id);
+}
+
+async function findOrCreateTagId(title) {
+  await ensureTagsLoaded();
+  if (tagIdByTitle.has(title)) return tagIdByTitle.get(title);
+  try {
+    const created = await apiRequest('POST', '/tags', { title });
+    tagIdByTitle.set(title, created.id);
+    return created.id;
+  } catch (e) {
+    // Joplin normalizes/dedupes tag titles (e.g. by case), so the create can
+    // fail if a differently-cased match already exists. Refetch once and
+    // retry the lookup before giving up.
+    tagIdByTitle = null;
+    await ensureTagsLoaded();
+    const existingId = tagIdByTitle.get(title);
+    if (existingId) return existingId;
+    throw e;
+  }
+}
+
+// One-way (Super Productivity -> Joplin) sync of a single note's tag set:
+// adds tags present in desiredTitles but missing on the note, removes tags
+// present on the note but no longer in desiredTitles. Joplin's Web Clipper
+// API has no batch-tagging endpoint, so this costs one GET plus one
+// POST/DELETE per tag actually added or removed.
+async function syncNoteTags(noteId, desiredTitles) {
+  const current = await listAll('/notes/' + noteId + '/tags', 'id,title');
+  const currentByTitle = new Map(current.map((t) => [t.title, t.id]));
+  const desired = new Set(desiredTitles);
+  for (const title of desired) {
+    if (!currentByTitle.has(title)) {
+      const tagId = await findOrCreateTagId(title);
+      await apiRequest('POST', '/tags/' + tagId + '/notes', { id: noteId });
+    }
+  }
+  for (const [title, tagId] of currentByTitle) {
+    if (!desired.has(title)) {
+      await apiRequest('DELETE', '/tags/' + tagId + '/notes/' + noteId);
+    }
+  }
 }
 
 // Ids are opaque, whitespace-free tokens, so match anything up to the
@@ -391,16 +454,18 @@ for (const project of projects) {
         const titleStale = !!existing && existing.title !== item.title;
 
         switch (decision.action) {
-          case 'create':
+          case 'create': {
             if (!tasksFolderId) tasksFolderId = await findOrCreateFolder('Tasks', folderId);
-            await apiRequest('POST', '/notes', {
+            const created = await apiRequest('POST', '/notes', {
               title: item.title,
               body: item.body,
               parent_id: tasksFolderId,
             });
             projectResult.created += 1;
             projectResult.taskNotesSynced[item.id] = spContent;
+            if (syncTaskTags) await syncNoteTags(created.id, item.tagTitles || []);
             break;
+          }
           case 'update':
             await apiRequest('PUT', '/notes/' + existing.id, {
               title: item.title,
@@ -408,6 +473,7 @@ for (const project of projects) {
             });
             projectResult.updated += 1;
             projectResult.taskNotesSynced[item.id] = spContent;
+            if (syncTaskTags) await syncNoteTags(existing.id, item.tagTitles || []);
             break;
           case 'delete': {
             const archived = await removeOrArchive(existing.id, tasksFolderId);
@@ -421,6 +487,7 @@ for (const project of projects) {
               await apiRequest('PUT', '/notes/' + existing.id, { title: item.title });
               projectResult.updated += 1;
             }
+            if (syncTaskTags) await syncNoteTags(existing.id, item.tagTitles || []);
             projectResult.taskNotesPulled.push({ taskId: item.id, content: decision.content });
             break;
           default:
@@ -430,6 +497,7 @@ for (const project of projects) {
             } else {
               projectResult.unchanged += 1;
             }
+            if (syncTaskTags && existing) await syncNoteTags(existing.id, item.tagTitles || []);
             if (decision.syncedContent !== undefined) {
               projectResult.taskNotesSynced[item.id] = decision.syncedContent;
             }
@@ -579,6 +647,7 @@ async function loadEffectiveConfig() {
       : DEFAULTS.syncIntervalSec,
     syncTaskNotes: cfg.syncTaskNotes === true,
     taskNotesOneWay: cfg.taskNotesOneWay === true,
+    syncTaskTags: cfg.syncTaskTags === true,
     archiveRemovedNotes: cfg.archiveRemovedNotes === true,
   };
 }
@@ -649,7 +718,9 @@ async function performSync(trigger) {
   const appState = await PluginAPI.getAppState();
   const notesById = appState.notes || {};
   const tasksById = appState.tasks || {};
+  const tagsById = appState.tags || {};
   const allTasks = Object.values(tasksById);
+  const syncTaskTags = config.syncTaskNotes && config.syncTaskTags;
 
   const taskSyncState = config.syncTaskNotes
     ? await loadTaskSyncState()
@@ -710,6 +781,11 @@ async function performSync(trigger) {
                 body: buildTaskBody(t, syncId),
                 spUpdated: t.updated || t.created || 0,
                 lastSynced,
+                tagTitles: syncTaskTags
+                  ? (t.tagIds || [])
+                      .map((tagId) => tagsById[tagId] && tagsById[tagId].title)
+                      .filter((title) => !!title)
+                  : undefined,
               };
             })
             .filter((item) => item !== null)
@@ -778,6 +854,7 @@ async function performSync(trigger) {
               projects: [projectChunk],
               syncTaskNotes: config.syncTaskNotes,
               taskNotesOneWay: config.taskNotesOneWay,
+              syncTaskTags,
               pullsAllowed,
               archiveRemovedNotes: config.archiveRemovedNotes,
             },

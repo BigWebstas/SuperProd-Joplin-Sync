@@ -49,9 +49,9 @@ Joplin notes.
 3. Paste the token under "1. Joplin API token" and save. The token is stored as a
    local secret on this device only (never synced, exported, or backed up).
 4. Optionally adjust the Joplin URL, parent notebook name, auto-sync interval,
-   whether task notes are synced (and one-way or two-way), or whether removed notes
-   are archived instead of deleted, under **Settings → Plugins → Joplin Notes
-   Sync**.
+   whether task notes are synced (and one-way or two-way), whether task tags are
+   synced too, or whether removed notes are archived instead of deleted, under
+   **Settings → Plugins → Joplin Notes Sync**.
 5. Grant the Node execution permission when prompted, either via the "Sync Now"
    button on the plugin page or the header "Joplin Sync" button.
 
@@ -156,6 +156,19 @@ multi-device race above can't happen. Use this if you don't need to edit task
 notes from within Joplin, or if you've hit the multi-device duplication issue and
 want to rule the race out entirely.
 
+#### Task tags
+
+Enabling **Sync task tags** (only takes effect alongside **Sync task notes**) sets
+each task's Joplin note to have the same Joplin tags as the task's Super
+Productivity tags — creating any Joplin tag that doesn't already exist by title,
+and adding/removing tags on the note to match. This is **always one-way** (Super
+Productivity → Joplin), independently of the **One-way task notes** setting above:
+there's nowhere in Super Productivity to write a Joplin-side tag change back to,
+so tags added or removed on a note directly in Joplin are simply overwritten on
+the next sync. A task with no notes content is never given a Joplin note in the
+first place (see [Task notes](#task-notes-optional)), so its tags aren't synced
+either until it has some notes content.
+
 ## Packaging
 
 This plugin ships as plain files (no build step). To install it, zip the contents
@@ -166,6 +179,7 @@ of this folder (`manifest.json`, `config-schema.json`, `plugin.js`, `index.html`
 
 Full release notes and downloadable zips: [GitHub Releases](https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases).
 
+- **v1.6.0** — Option to sync each task's Super Productivity tags onto its Joplin note as Joplin tags (one-way, requires task notes sync).
 - **v1.5.0** — Option to make task notes sync one-way (Super Productivity → Joplin only) instead of two-way.
 - **v1.4.0** — Option to archive removed notes into an `Archive` sub-notebook instead of deleting them.
 - **v1.3.0** — Completed tasks get a `[Done] ` prefix on their Joplin note title (task notes sync only).
