@@ -22,6 +22,17 @@ Joplin notes.
   is a heuristic, not a guarantee. If task duplication shows up on a multi-device
   setup, this race is still the first thing to suspect — switching to one-way task
   notes sidesteps it entirely, since it never calls `updateTask`.
+- **Duplicate Joplin notes can appear on a multi-device setup**, separately from the
+  race above: each device runs this plugin against its own local Joplin instance, and
+  Joplin's own sync propagates notes between them independently of this plugin. Two
+  devices can each create a note for the same project note or task before either sees
+  the other's copy, leaving two Joplin notes with the same hidden id marker (see
+  [How matching works](#how-matching-works)) once Joplin's sync has caught up. This
+  can't be prevented outright — Joplin's API has no atomic "create if missing" — but
+  the next sync on either device detects any such group and collapses it automatically,
+  keeping the most recently updated note and removing the rest (or archiving them,
+  if **Archive removed notes** is on), so a duplicate heals itself rather than sticking
+  around forever.
 - **Desktop only.** Joplin's REST API only listens on `127.0.0.1`, which the browser
   sandbox blocks for regular plugin network calls. This plugin instead runs the HTTP
   calls through Super Productivity's `nodeExecution` capability (Electron desktop
@@ -179,6 +190,7 @@ of this folder (`manifest.json`, `config-schema.json`, `plugin.js`, `index.html`
 
 Full release notes and downloadable zips: [GitHub Releases](https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases).
 
+- **v1.7.0** — Fix: duplicate Joplin notes left behind when two devices raced to create the same note now get detected and collapsed on the next sync instead of lingering forever.
 - **v1.6.0** — Option to sync each task's Super Productivity tags onto its Joplin note as Joplin tags (one-way, requires task notes sync).
 - **v1.5.0** — Option to make task notes sync one-way (Super Productivity → Joplin only) instead of two-way.
 - **v1.4.0** — Option to archive removed notes into an `Archive` sub-notebook instead of deleting them.

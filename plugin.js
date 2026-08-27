@@ -229,6 +229,43 @@ async function removeOrArchive(joplinNoteId, parentId) {
   return false;
 }
 
+// Each device runs this plugin against its own local Joplin instance, and
+// Joplin's own sync propagates notes between devices independently of this
+// plugin. Two devices can therefore both list a folder, both see no note yet
+// for a given sp-note-id/sp-task-id, and both create one; once Joplin's sync
+// has propagated both copies everywhere, a later sync here sees two notes
+// sharing the same marker. Grouping them with a plain Map (keyed by that id)
+// would silently keep only whichever is listed last, leaving the other
+// invisible to both the update path and the orphan-deletion sweep below —
+// i.e. a permanent duplicate. Grouping explicitly and collapsing any group of
+// more than one note (keeping the most recently updated, removing the rest
+// via removeOrArchive) makes a race like this heal itself on the very next
+// sync instead of leaving Joplin cluttered forever. This can't prevent the
+// race itself — Joplin's API has no atomic "create if missing" — only clean
+// up after it.
+async function dedupeByMarker(notes, markerRe, parentIdForArchive) {
+  const groups = new Map();
+  for (const jn of notes) {
+    const match = jn.body && jn.body.match(markerRe);
+    if (!match) continue;
+    if (!groups.has(match[1])) groups.set(match[1], []);
+    groups.get(match[1]).push(jn);
+  }
+  const byId = new Map();
+  let archived = 0;
+  let deleted = 0;
+  for (const [id, group] of groups) {
+    group.sort((a, b) => (b.updated_time || 0) - (a.updated_time || 0));
+    const [keep, ...dupes] = group;
+    byId.set(id, keep);
+    for (const dupe of dupes) {
+      if (await removeOrArchive(dupe.id, parentIdForArchive)) archived += 1;
+      else deleted += 1;
+    }
+  }
+  return { byId, archived, deleted };
+}
+
 // Memoizes Joplin tag id lookups by title within a single script run, so
 // several tasks sharing a tag only trigger one GET /tags (to seed the cache)
 // and, for a genuinely new tag, one POST /tags rather than one lookup each.
@@ -371,13 +408,15 @@ for (const project of projects) {
   };
   try {
     const folderId = await findOrCreateFolder(project.title, rootFolderId);
-    const existingNotes = await listAll('/folders/' + folderId + '/notes', 'id,title,body');
+    const existingNotes = await listAll(
+      '/folders/' + folderId + '/notes',
+      'id,title,body,updated_time',
+    );
 
-    const byNoteId = new Map();
-    for (const jn of existingNotes) {
-      const match = jn.body && jn.body.match(MARKER_RE);
-      if (match) byNoteId.set(match[1], jn);
-    }
+    const noteDedup = await dedupeByMarker(existingNotes, MARKER_RE, folderId);
+    const byNoteId = noteDedup.byId;
+    projectResult.archived += noteDedup.archived;
+    projectResult.deleted += noteDedup.deleted;
 
     for (const note of project.notes) {
       const existing = byNoteId.get(note.id);
@@ -435,11 +474,10 @@ for (const project of projects) {
         ? await listAll('/folders/' + tasksFolderId + '/notes', 'id,title,body,updated_time')
         : [];
 
-      const byTaskId = new Map();
-      for (const jn of existingTaskNotes) {
-        const match = jn.body && jn.body.match(TASK_MARKER_RE);
-        if (match) byTaskId.set(match[1], jn);
-      }
+      const taskDedup = await dedupeByMarker(existingTaskNotes, TASK_MARKER_RE, tasksFolderId);
+      const byTaskId = taskDedup.byId;
+      projectResult.archived += taskDedup.archived;
+      projectResult.deleted += taskDedup.deleted;
 
       for (const item of taskNotes) {
         const existing = byTaskId.get(item.id) || null;
