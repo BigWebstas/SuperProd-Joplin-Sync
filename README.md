@@ -1,205 +1,74 @@
 # Joplin Notes Sync
 
-Pushes each Super Productivity project's **Notes** into a matching notebook in
-[Joplin](https://joplinapp.org/), so you can read/search them alongside your other
-Joplin notes.
+A Super Productivity plugin that pushes each project's **Notes** into a matching
+[Joplin](https://joplinapp.org/) notebook, so you can read and search them
+alongside your other Joplin notes. Optionally syncs each task's own Notes field
+too.
 
-## Important limitations
-
-- **Project notes are one-way only** (Super Productivity → Joplin). The plugin API
-  does not allow plugins to create, update, or delete this kind of note inside Super
-  Productivity, so nothing written in Joplin ever comes back. Treat the notebooks
-  these land in as a mirror, not a place to edit.
-- **Task notes, if enabled, are two-way by default** — see
-  [Task notes](#task-notes-optional) below for how conflicts are resolved, or enable
-  **One-way task notes** to make Super Productivity the only source of truth instead
-  (same direction as project notes). Two-way sync calls `PluginAPI.updateTask`, which
-  can in principle race with Super Productivity's own cross-device sync if you run it
-  on more than one device (an earlier version of this plugin reverted to one-way over
-  exactly that risk). The plugin withholds a pull for a while after a task looks like
-  it just changed, to narrow that window — see [Task notes](#task-notes-optional) for
-  how — but Super Productivity doesn't expose its own sync status to plugins, so this
-  is a heuristic, not a guarantee. If task duplication shows up on a multi-device
-  setup, this race is still the first thing to suspect — switching to one-way task
-  notes sidesteps it entirely, since it never calls `updateTask`.
-- **Duplicate Joplin notes can appear on a multi-device setup**, separately from the
-  race above: each device runs this plugin against its own local Joplin instance, and
-  Joplin's own sync propagates notes between them independently of this plugin. Two
-  devices can each create a note for the same project note or task before either sees
-  the other's copy, leaving two Joplin notes with the same hidden id marker (see
-  [How matching works](#how-matching-works)) once Joplin's sync has caught up. This
-  can't be prevented outright — Joplin's API has no atomic "create if missing" — but
-  the next sync on either device detects any such group and collapses it automatically,
-  keeping the most recently updated note and removing the rest (or archiving them,
-  if **Archive removed notes** is on), so a duplicate heals itself rather than sticking
-  around forever.
-- **Desktop only.** Joplin's REST API only listens on `127.0.0.1`, which the browser
-  sandbox blocks for regular plugin network calls. This plugin instead runs the HTTP
-  calls through Super Productivity's `nodeExecution` capability (Electron desktop
-  app only), which requires a one-time consent prompt the first time it runs. That
-  capability spawns a Node process by passing the whole script and all its data as a
-  single command-line argument, which has a much lower effective length limit on
-  Windows than on Linux/macOS — the plugin works around this by syncing one project
-  per call, and, within a project, splitting its notes and task notes into further
-  calls if there's enough content that even one project's payload would exceed a
-  conservative size budget (see `MAX_PROJECT_PAYLOAD_CHARS` and the comment above
-  `NODE_SYNC_SCRIPT` in `plugin.js`).
-- **The plugin fully manages the target notebooks.** A note deleted in a Super
-  Productivity project is deleted from the corresponding Joplin notebook on the next
-  sync (or, if **Archive removed notes** is enabled, moved into an `Archive`
-  sub-notebook instead — see [Notebook layout](#notebook-layout)). Don't keep
-  manually-created notes inside the notebooks this plugin creates.
-- Only **active (non-archived) projects that have at least one note** are synced.
+**Desktop only.** Joplin's REST API only listens on `127.0.0.1`, so the plugin
+runs its HTTP calls through Super Productivity's `nodeExecution` capability
+(Electron desktop app), which needs a one-time consent prompt.
 
 ## Setup
 
-1. In Joplin: **Options → Web Clipper**, enable the clipper service, and copy the
+1. In Joplin: **Options → Web Clipper**, enable the service, copy the
    **Authorization token**.
-2. Install this plugin in Super Productivity (**Settings → Plugins → Upload Plugin**,
-   pointing at a zip of this folder), then open it from the app menu.
-3. Paste the token under "1. Joplin API token" and save. The token is stored as a
-   local secret on this device only (never synced, exported, or backed up).
-4. Optionally adjust the Joplin URL, parent notebook name, auto-sync interval,
-   whether task notes are synced (and one-way or two-way), whether task tags are
-   synced too, or whether removed notes are archived instead of deleted, under
-   **Settings → Plugins → Joplin Notes Sync**.
-5. Grant the Node execution permission when prompted, either via the "Sync Now"
-   button on the plugin page or the header "Joplin Sync" button.
-
-## How matching works
-
-Each pushed note gets a hidden `<!-- sp-note-id:<id> --\>` marker appended to its
-body. On every sync, the plugin lists the notes already in the project's Joplin
-notebook, matches them back to Super Productivity notes by that marker, and only
-creates/updates notes whose content actually changed. This means the link survives
-plugin reinstalls and doesn't depend on any local cache.
+2. In Super Productivity: **Settings → Plugins → Upload Plugin**, pointing at a
+   zip of this folder (`manifest.json`, `config-schema.json`, `plugin.js`,
+   `index.html`, `icon.svg`). No build step.
+3. Open the plugin, paste the token, Save. Grant the Node execution permission
+   when prompted.
+4. Adjust options under **Settings → Plugins → Joplin Notes Sync** — Joplin URL,
+   parent notebook, auto-sync interval, task-note sync, and archive-vs-delete.
 
 ## Notebook layout
 
 ```
-<parent notebook, default "Super Productivity">
-  └── <project title>
-        ├── <note 1 title>
-        ├── <note 2 title>
-        ├── Archive/                   (only if "Archive removed notes" is enabled)
-        │     └── <removed note title>
-        └── Tasks/                     (only if "Sync task notes" is enabled)
-              ├── <task 1 title>
-              ├── <task 2 title>
-              └── Archive/              (only if "Archive removed notes" is enabled)
-                    └── <removed task note title>
+Super Productivity/            (parent, configurable)
+  └── <project title>/
+        ├── <note title>
+        ├── Archive/           (if "Archive removed notes" is on)
+        └── Tasks/             (if "Sync task notes" is on)
+              └── <task title>
 ```
 
-Note titles are derived from the first non-empty line of the note's markdown
-content (headings/list markers stripped, truncated to 80 characters).
+Note titles come from the first non-empty line of the note (truncated to 80
+chars). The plugin fully manages these notebooks — a note removed in Super
+Productivity is deleted (or archived) in Joplin on the next sync, so don't put
+your own notes in them.
 
-### Archiving removed notes (optional)
+## Sync direction
 
-By default, a note (or task note) whose source no longer exists in Super
-Productivity is deleted from Joplin on the next sync. Enabling **Archive removed
-notes** moves it into an `Archive` sub-notebook instead (under the project for
-project notes, under `Tasks` for task notes) rather than deleting it. This also
-applies when a task's notes field is cleared out, whether task notes are synced
-one-way or two-way. An archived note keeps its `sp-note-id`/`sp-task-id` marker
-but is no longer matched against Super Productivity on future syncs — if the same
-note or task reappears, it gets a brand-new Joplin note rather than reviving the
-archived one.
+| Content | Direction | Conflict rule |
+|---|---|---|
+| Project notes | Super Productivity → Joplin only | n/a — Joplin edits never come back |
+| Task notes (default) | two-way | most recently edited side wins, no merge |
+| Task notes with **One-way task notes** on | Super Productivity → Joplin only | Super Productivity always wins |
+| Task tags (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 
-### Task notes (optional)
+Completed tasks get a `[Done] ` prefix on their Joplin note title.
 
-Enabling **Sync task notes** additionally syncs each task's own **Notes** field
-(the one you open from the task itself) with a `Tasks` sub-notebook under its
-project — one Joplin note per task, titled with the task's own title, for any
-task belonging to that project that has (or has ever had) notes, done or not,
-top-level or subtask. This is separate from, and in addition to, the project's
-Notes tab, which is always one-way. Task notes are matched back by task id the
-same way project notes are matched by note id, so the two never collide.
+## Matching
 
-A completed task's Joplin note title gets a `[Done] ` prefix (e.g. `[Done] Buy
-groceries`), independently of whether its notes content changed — marking a task
-done pushes the title update on its own next sync, and un-marking it removes the
-prefix again. This is SP → Joplin only, same direction as the title itself
-always syncs; there's no "done" concept on the Joplin side to pull back.
+Every synced note gets a hidden `<!-- sp-note-id:<id> -->` marker in its body.
+Each sync lists the notebook's notes, matches them by that marker, and only
+writes the ones that changed — so the link survives plugin reinstalls with no
+local cache.
 
-Recurring calendar-imported tasks (Google/ICS) get a new task id per day's
-occurrence; the plugin strips that trailing occurrence timestamp before using
-the id as the sync key, so a daily recurring event still collapses onto a
-single Joplin note instead of spawning a new one every day.
+## Multi-device caveats
 
-Unlike project notes, **task notes sync both ways by default**: `PluginAPI.
-updateTask` can write back into a task, so an edit made in Joplin gets pulled into
-the task, and an edit made in the task gets pushed to Joplin. To tell which side
-actually changed, the plugin keeps a per-task "last synced content" baseline
-(stored via `persistDataSynced`, so it's shared across your devices, not just this
-one):
-
-- If only one side moved since that baseline, that side's change wins.
-- If **both** sides changed since the last sync (a real conflict), the more
-  recently edited one wins and silently overwrites the other — there is no
-  merge, and no prompt. If you edit the same task's notes in both apps between
-  syncs, expect to lose one of the two edits.
-- Deleting a task's notes on one side deletes the Joplin note (rather than
-  leaving an empty one); deleting the task entirely removes its Joplin note on
-  the next sync.
-
-Pulling Joplin's side into a task (the only direction that writes back into Super
-Productivity) is deliberately held back in two situations, both aimed at avoiding
-the race described in [Important limitations](#important-limitations):
-
-- **Settle window.** A pull is withheld until the task hasn't changed on the Super
-  Productivity side for 2 minutes, since a just-touched task is more likely to
-  still be mid-flight through Super Productivity's own sync.
-- **Post-burst cooldown.** Super Productivity's own incoming sync tends to touch
-  many tasks in a tight burst, unlike a human editing one task at a time. Seeing
-  a burst pauses pulls (pushes to Joplin keep working normally) for 60 seconds.
-
-Neither of these is a real signal — Super Productivity doesn't expose sync status
-to plugins — so they narrow the collision window without closing it.
-
-#### One-way task notes
-
-Enabling **One-way task notes** turns task notes into a one-way mirror, exactly
-like project notes: Super Productivity is always the source of truth, a mismatch
-always gets overwritten with the Super Productivity side on the next sync (no
-last-write-wins comparison, no baseline), and nothing is ever pulled from Joplin
-into a task — so `PluginAPI.updateTask` is never called for task notes and the
-multi-device race above can't happen. Use this if you don't need to edit task
-notes from within Joplin, or if you've hit the multi-device duplication issue and
-want to rule the race out entirely.
-
-#### Task tags
-
-Enabling **Sync task tags** (only takes effect alongside **Sync task notes**) sets
-each task's Joplin note to have the same Joplin tags as the task's Super
-Productivity tags — creating any Joplin tag that doesn't already exist by title,
-and adding/removing tags on the note to match. This is **always one-way** (Super
-Productivity → Joplin), independently of the **One-way task notes** setting above:
-there's nowhere in Super Productivity to write a Joplin-side tag change back to,
-so tags added or removed on a note directly in Joplin are simply overwritten on
-the next sync. A task with no notes content is never given a Joplin note in the
-first place (see [Task notes](#task-notes-optional)), so its tags aren't synced
-either until it has some notes content.
-
-## Packaging
-
-This plugin ships as plain files (no build step). To install it, zip the contents
-of this folder (`manifest.json`, `config-schema.json`, `plugin.js`, `index.html`,
-`icon.svg`) and upload the zip via **Settings → Plugins → Upload Plugin**.
+- **Two-way task notes** call `PluginAPI.updateTask`, which can race with Super
+  Productivity's own cross-device sync. The plugin delays pulls from Joplin for a
+  couple of minutes after a task looks freshly changed, but that's a heuristic,
+  not a guarantee. If tasks start duplicating, switch to **One-way task notes** —
+  it never writes back, so the race can't happen.
+- **Duplicate Joplin notes** can appear when two devices each create a note for
+  the same source before Joplin's own sync catches up. There's no atomic
+  "create if missing" in Joplin's API, but the next sync detects and collapses
+  any such group automatically, keeping the newest.
+- Only **active projects with at least one note** are synced.
 
 ## Changelog
 
-Full release notes and downloadable zips: [GitHub Releases](https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases).
-
-- **v1.7.0** — Fix: duplicate Joplin notes left behind when two devices raced to create the same note now get detected and collapsed on the next sync instead of lingering forever.
-- **v1.6.0** — Option to sync each task's Super Productivity tags onto its Joplin note as Joplin tags (one-way, requires task notes sync).
-- **v1.5.0** — Option to make task notes sync one-way (Super Productivity → Joplin only) instead of two-way.
-- **v1.4.0** — Option to archive removed notes into an `Archive` sub-notebook instead of deleting them.
-- **v1.3.0** — Completed tasks get a `[Done] ` prefix on their Joplin note title (task notes sync only).
-- **v1.2.2** — Fix: `spawn ENAMETOOLONG` recurring on Windows once task notes grew large; payloads are now chunked per project instead of assumed to fit in one call.
-- **v1.2.1** — Task notes sync two-way again, with heuristic mitigations for the multi-device task-duplication race; new plugin icon.
-- **v1.1.5** — Fix: recurring calendar-imported tasks no longer duplicate their Joplin note on every occurrence.
-- **v1.1.3** — Maintenance only (add `.idea/` to `.gitignore`); no functional changes.
-- **v1.1.2** — Fix: `spawn ENAMETOOLONG` on Windows; one `executeNodeScript` call per project instead of one for everything.
-- **v1.1.1** — Fix: task notes duplicating tasks on multi-device setups; reverted task notes to one-way pending a proper fix.
-- **v1.1.0** — Task notes: optional two-way sync of each task's own Notes field into a `Tasks` sub-notebook.
-- **v1.0.0** — Initial release: one-way sync of project notes into Joplin notebooks.
+Full notes and downloadable zips:
+[Releases](https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases).
