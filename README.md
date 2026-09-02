@@ -85,5 +85,5 @@ local cache.
 
 ## Changelog
 
-Full notes and downloadable zips:
-[Releases](https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases).
+Version history: [CHANGELOG.md](CHANGELOG.md). Full write-ups and downloadable
+zips: [Releases](https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases).
