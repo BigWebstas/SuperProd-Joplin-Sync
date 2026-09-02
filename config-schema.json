@@ -47,6 +47,12 @@
       "title": "Archive removed notes instead of deleting",
       "description": "When a note (or task note) no longer exists on the Super Productivity side, move its Joplin note into an \"Archive\" sub-notebook instead of deleting it outright.",
       "default": false
+    },
+    "syncProjectIcons": {
+      "type": "boolean",
+      "title": "Sync project icons and colours",
+      "description": "Give each project's Joplin sub-notebook a custom icon: the project's icon glyph on a tile filled with the project's theme colour. One-way (Super Productivity → Joplin). Joplin has no notebook colour field, so the colour is carried inside the icon image. Only projects that have at least one note to sync get their icon. Turning this off later leaves icons already set in place.",
+      "default": false
     }
   },
   "required": []

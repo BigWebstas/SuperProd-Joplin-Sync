@@ -53,6 +53,7 @@ const DEFAULTS = {
   taskNotesOneWay: false,
   syncTaskTags: false,
   archiveRemovedNotes: false,
+  syncProjectIcons: false,
 };
 
 // Matches sp-note-id / sp-task-id markers written into a note body (see
@@ -114,6 +115,14 @@ const pullsAllowed = input.pullsAllowed !== false;
 // drops out of byNoteId/byTaskId on the next sync and is never reconsidered
 // — archiving is a one-way move, not a tracked state.
 const archiveRemovedNotes = input.archiveRemovedNotes === true;
+// One-way (SP -> Joplin) sync of each project's Super Productivity icon glyph
+// and theme colour onto its Joplin sub-notebook's icon. Joplin notebooks have
+// no colour field at all, so both are baked into a small SVG image set as the
+// folder's data-URL icon (FolderIconType.DataUrl). See buildProjectFolderIcon.
+// Applied only on a project's last chunk, alongside the orphan sweeps. Turning
+// this off later leaves any icons already set in place (a one-way write, not a
+// tracked state) — same as archiveRemovedNotes.
+const syncProjectIcons = input.syncProjectIcons === true;
 
 function apiRequest(method, path, body) {
   return new Promise((resolve, reject) => {
@@ -203,6 +212,95 @@ async function findOrCreateFolder(title, parentId) {
     parent_id: parentId || undefined,
   });
   return created.id;
+}
+
+// Parses "#rgb", "#rrggbb", "rgb(r,g,b)" or "rgba(r,g,b,a)" into [r,g,b];
+// returns null if it can't. Super Productivity stores project.theme.primary
+// in any of these forms depending on how the colour was picked.
+function parseColor(value) {
+  const s = String(value || '').trim().toLowerCase();
+  let m = s.match(/^#([0-9a-f]{3})$/);
+  if (m) {
+    return [
+      parseInt(m[1][0] + m[1][0], 16),
+      parseInt(m[1][1] + m[1][1], 16),
+      parseInt(m[1][2] + m[1][2], 16),
+    ];
+  }
+  m = s.match(/^#([0-9a-f]{6})$/);
+  if (m) {
+    return [
+      parseInt(m[1].slice(0, 2), 16),
+      parseInt(m[1].slice(2, 4), 16),
+      parseInt(m[1].slice(4, 6), 16),
+    ];
+  }
+  m = s.match(/^rgba?\\(([^)]+)\\)/);
+  if (m) {
+    const parts = m[1].split(',').map((p) => parseFloat(p.trim()));
+    if (parts.length >= 3 && parts.slice(0, 3).every((n) => isFinite(n))) {
+      return parts.slice(0, 3).map((n) => Math.max(0, Math.min(255, Math.round(n))));
+    }
+  }
+  return null;
+}
+
+// A subset of Super Productivity's Material Symbols icon names mapped to one
+// emoji, used as the glyph on the generated folder icon. Names not listed here
+// fall back to the first character of the project title.
+const PROJECT_ICON_EMOJI = {
+  inbox: '📥', person: '👤', people: '👥', group: '👥', groups: '👥',
+  chat: '💬', forum: '💬', mail: '✉️', email: '✉️',
+  home: '🏠', family_home: '🏡', cottage: '🏡',
+  work: '💼', business_center: '💼', cases: '💼',
+  code: '💻', code_blocks: '💻', terminal: '💻', bug_report: '🐛',
+  rocket_launch: '🚀', favorite: '❤️', star: '⭐',
+  school: '🎓', menu_book: '📖', book: '📖',
+  shopping_cart: '🛒', attach_money: '💰', savings: '💰', payments: '💰',
+  fitness_center: '🏋️', directions_run: '🏃', self_improvement: '🧘',
+  restaurant: '🍽️', local_cafe: '☕',
+  flight: '✈️', directions_car: '🚗', pets: '🐾',
+  potted_plant: '🪴', yard: '🌱', eco: '🌱', agriculture: '🚜', bucket_check: '🪣',
+  movie: '🎬', music_note: '🎵', sports_esports: '🎮', photo_camera: '📷',
+  palette: '🎨', build: '🔧', handyman: '🛠️', science: '🔬',
+  medical_services: '🩺', event: '📅', calendar_month: '📅',
+  checklist: '✅', task_alt: '✅', flag: '🚩', lightbulb: '💡', folder: '📁',
+};
+
+function projectIconGlyph(iconName, title) {
+  const key = String(iconName || '').trim().toLowerCase();
+  if (PROJECT_ICON_EMOJI[key]) return { text: PROJECT_ICON_EMOJI[key], emoji: true };
+  const letter = String(title || '').trim().charAt(0).toUpperCase();
+  return { text: letter || '•', emoji: false };
+}
+
+// Builds the serialized Joplin folder-icon value (a JSON string, the same form
+// Joplin's own UI writes) for a project: an SVG tile filled with the project's
+// theme colour carrying its icon glyph. Joplin notebooks have no colour field,
+// so this is the only channel for the colour. Returns '' when there's nothing
+// worth drawing (colour unparseable and no title to take a letter from).
+function buildProjectFolderIcon(iconName, color, title) {
+  const rgb = parseColor(color);
+  const glyph = projectIconGlyph(iconName, title);
+  if (!rgb && glyph.text === '•') return '';
+  const bg = rgb || [136, 136, 136];
+  const luma = (0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2]) / 255;
+  const fg = luma > 0.6 ? '#1b1b1b' : '#ffffff';
+  const hex = '#' + bg.map((n) => ('0' + n.toString(16)).slice(-2)).join('');
+  const size = glyph.emoji ? 38 : 40;
+  const escaped = glyph.text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">' +
+    '<rect width="64" height="64" rx="13" fill="' + hex + '"/>' +
+    '<text x="32" y="34" text-anchor="middle" dominant-baseline="central" ' +
+    'font-family="Arial, Helvetica, sans-serif" font-size="' + size + '" ' +
+    'font-weight="600" fill="' + fg + '">' + escaped + '</text></svg>';
+  const dataUrl =
+    'data:image/svg+xml;base64,' + Buffer.from(svg, 'utf8').toString('base64');
+  return JSON.stringify({ type: 2, emoji: '', name: '', dataUrl: dataUrl });
 }
 
 // Memoizes the "Archive" folder id per parent within a single script run, so
@@ -403,6 +501,7 @@ for (const project of projects) {
     archived: 0,
     unchanged: 0,
     error: null,
+    iconError: null,
     taskNotesSynced: {},
     taskNotesPulled: [],
   };
@@ -456,6 +555,32 @@ for (const project of projects) {
           if (archived) projectResult.archived += 1;
           else projectResult.deleted += 1;
         }
+      }
+    }
+
+    // Project icon + colour (opt-in). One-way, best-effort, last chunk only:
+    // read the folder's current icon and PUT only when it differs, so a sync
+    // that changed nothing here writes nothing. Wrapped in its own try/catch —
+    // the icon is cosmetic, so a failure here must not skip the task-note sync
+    // below or fail the project. It's recorded on projectResult.iconError.
+    if (project.isLastChunk && syncProjectIcons) {
+      try {
+        const desiredIcon = buildProjectFolderIcon(
+          project.icon,
+          project.color,
+          project.title,
+        );
+        if (desiredIcon) {
+          const current = await apiRequest(
+            'GET',
+            '/folders/' + folderId + '?fields=id,icon',
+          );
+          if (!current || current.icon !== desiredIcon) {
+            await apiRequest('PUT', '/folders/' + folderId, { icon: desiredIcon });
+          }
+        }
+      } catch (e) {
+        projectResult.iconError = e.message;
       }
     }
 
@@ -687,6 +812,7 @@ async function loadEffectiveConfig() {
     taskNotesOneWay: cfg.taskNotesOneWay === true,
     syncTaskTags: cfg.syncTaskTags === true,
     archiveRemovedNotes: cfg.archiveRemovedNotes === true,
+    syncProjectIcons: cfg.syncProjectIcons === true,
   };
 }
 
@@ -829,7 +955,18 @@ async function performSync(trigger) {
             .filter((item) => item !== null)
         : [];
 
-      return { id: p.id, title: p.title, notes, taskNotes };
+      return {
+        id: p.id,
+        title: p.title,
+        icon:
+          config.syncProjectIcons && typeof p.icon === 'string' ? p.icon : undefined,
+        color:
+          config.syncProjectIcons && p.theme && typeof p.theme.primary === 'string'
+            ? p.theme.primary
+            : undefined,
+        notes,
+        taskNotes,
+      };
     })
     .filter((p) => p.notes.length > 0 || p.taskNotes.length > 0);
 
@@ -873,6 +1010,8 @@ async function performSync(trigger) {
       const projectChunk = {
         id: project.id,
         title: project.title,
+        icon: isLastChunk ? project.icon : undefined,
+        color: isLastChunk ? project.color : undefined,
         notes: noteChunks[i] || [],
         taskNotes: taskChunks[i] || [],
         isLastChunk,
@@ -895,6 +1034,7 @@ async function performSync(trigger) {
               syncTaskTags,
               pullsAllowed,
               archiveRemovedNotes: config.archiveRemovedNotes,
+              syncProjectIcons: config.syncProjectIcons,
             },
           ],
           timeout: 25000,
@@ -977,6 +1117,7 @@ async function performSync(trigger) {
       acc.deleted += r.deleted || 0;
       acc.archived += r.archived || 0;
       if (r.error) acc.errors.push(r.projectTitle + ': ' + r.error);
+      if (r.iconError) acc.errors.push(r.projectTitle + ' (icon): ' + r.iconError);
       return acc;
     },
     { created: 0, updated: 0, deleted: 0, archived: 0, pulled: 0, errors: [] },

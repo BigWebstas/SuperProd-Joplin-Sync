@@ -19,7 +19,8 @@ runs its HTTP calls through Super Productivity's `nodeExecution` capability
 3. Open the plugin, paste the token, Save. Grant the Node execution permission
    when prompted.
 4. Adjust options under **Settings → Plugins → Joplin Notes Sync** — Joplin URL,
-   parent notebook, auto-sync interval, task-note sync, and archive-vs-delete.
+   parent notebook, auto-sync interval, task-note sync, archive-vs-delete, and
+   project icon/colour sync.
 
 ## Notebook layout
 
@@ -47,6 +48,20 @@ your own notes in them.
 | Task tags (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 
 Completed tasks get a `[Done] ` prefix on their Joplin note title.
+
+## Project icons and colours
+
+With **Sync project icons and colours** on, each project's Joplin sub-notebook
+gets a custom icon: the project's icon glyph on a tile filled with the project's
+theme colour. This is one-way (Super Productivity → Joplin) and best-effort — a
+failure to set an icon doesn't fail the note sync.
+
+Joplin notebooks have no colour field, so the colour is baked into the icon
+image itself (an SVG data-URL icon, the same slot Joplin's own icon picker
+uses). The glyph is an emoji for common Super Productivity icons, or the first
+letter of the project title otherwise. Only projects that have at least one note
+to sync get an icon. Turning the option off later leaves icons already set in
+place.
 
 ## Matching
 

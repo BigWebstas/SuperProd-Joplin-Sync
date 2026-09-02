@@ -212,7 +212,10 @@
             `Sync task tags: ${
               state.config.syncTaskNotes && state.config.syncTaskTags ? 'on' : 'off'
             }\n` +
-            `Archive removed notes: ${state.config.archiveRemovedNotes ? 'on' : 'off'}`;
+            `Archive removed notes: ${state.config.archiveRemovedNotes ? 'on' : 'off'}\n` +
+            `Sync project icons/colours: ${
+              state.config.syncProjectIcons ? 'on' : 'off'
+            }`;
           document.getElementById('status').textContent = formatSyncInfo(
             state.lastSyncInfo,
           );
