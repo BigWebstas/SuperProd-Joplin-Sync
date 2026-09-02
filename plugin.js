@@ -214,95 +214,6 @@ async function findOrCreateFolder(title, parentId) {
   return created.id;
 }
 
-// Parses "#rgb", "#rrggbb", "rgb(r,g,b)" or "rgba(r,g,b,a)" into [r,g,b];
-// returns null if it can't. Super Productivity stores project.theme.primary
-// in any of these forms depending on how the colour was picked.
-function parseColor(value) {
-  const s = String(value || '').trim().toLowerCase();
-  let m = s.match(/^#([0-9a-f]{3})$/);
-  if (m) {
-    return [
-      parseInt(m[1][0] + m[1][0], 16),
-      parseInt(m[1][1] + m[1][1], 16),
-      parseInt(m[1][2] + m[1][2], 16),
-    ];
-  }
-  m = s.match(/^#([0-9a-f]{6})$/);
-  if (m) {
-    return [
-      parseInt(m[1].slice(0, 2), 16),
-      parseInt(m[1].slice(2, 4), 16),
-      parseInt(m[1].slice(4, 6), 16),
-    ];
-  }
-  m = s.match(/^rgba?\\(([^)]+)\\)/);
-  if (m) {
-    const parts = m[1].split(',').map((p) => parseFloat(p.trim()));
-    if (parts.length >= 3 && parts.slice(0, 3).every((n) => isFinite(n))) {
-      return parts.slice(0, 3).map((n) => Math.max(0, Math.min(255, Math.round(n))));
-    }
-  }
-  return null;
-}
-
-// A subset of Super Productivity's Material Symbols icon names mapped to one
-// emoji, used as the glyph on the generated folder icon. Names not listed here
-// fall back to the first character of the project title.
-const PROJECT_ICON_EMOJI = {
-  inbox: '📥', person: '👤', people: '👥', group: '👥', groups: '👥',
-  chat: '💬', forum: '💬', mail: '✉️', email: '✉️',
-  home: '🏠', family_home: '🏡', cottage: '🏡',
-  work: '💼', business_center: '💼', cases: '💼',
-  code: '💻', code_blocks: '💻', terminal: '💻', bug_report: '🐛',
-  rocket_launch: '🚀', favorite: '❤️', star: '⭐',
-  school: '🎓', menu_book: '📖', book: '📖',
-  shopping_cart: '🛒', attach_money: '💰', savings: '💰', payments: '💰',
-  fitness_center: '🏋️', directions_run: '🏃', self_improvement: '🧘',
-  restaurant: '🍽️', local_cafe: '☕',
-  flight: '✈️', directions_car: '🚗', pets: '🐾',
-  potted_plant: '🪴', yard: '🌱', eco: '🌱', agriculture: '🚜', bucket_check: '🪣',
-  movie: '🎬', music_note: '🎵', sports_esports: '🎮', photo_camera: '📷',
-  palette: '🎨', build: '🔧', handyman: '🛠️', science: '🔬',
-  medical_services: '🩺', event: '📅', calendar_month: '📅',
-  checklist: '✅', task_alt: '✅', flag: '🚩', lightbulb: '💡', folder: '📁',
-};
-
-function projectIconGlyph(iconName, title) {
-  const key = String(iconName || '').trim().toLowerCase();
-  if (PROJECT_ICON_EMOJI[key]) return { text: PROJECT_ICON_EMOJI[key], emoji: true };
-  const letter = String(title || '').trim().charAt(0).toUpperCase();
-  return { text: letter || '•', emoji: false };
-}
-
-// Builds the serialized Joplin folder-icon value (a JSON string, the same form
-// Joplin's own UI writes) for a project: an SVG tile filled with the project's
-// theme colour carrying its icon glyph. Joplin notebooks have no colour field,
-// so this is the only channel for the colour. Returns '' when there's nothing
-// worth drawing (colour unparseable and no title to take a letter from).
-function buildProjectFolderIcon(iconName, color, title) {
-  const rgb = parseColor(color);
-  const glyph = projectIconGlyph(iconName, title);
-  if (!rgb && glyph.text === '•') return '';
-  const bg = rgb || [136, 136, 136];
-  const luma = (0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2]) / 255;
-  const fg = luma > 0.6 ? '#1b1b1b' : '#ffffff';
-  const hex = '#' + bg.map((n) => ('0' + n.toString(16)).slice(-2)).join('');
-  const size = glyph.emoji ? 38 : 40;
-  const escaped = glyph.text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-  const svg =
-    '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">' +
-    '<rect width="64" height="64" rx="13" fill="' + hex + '"/>' +
-    '<text x="32" y="34" text-anchor="middle" dominant-baseline="central" ' +
-    'font-family="Arial, Helvetica, sans-serif" font-size="' + size + '" ' +
-    'font-weight="600" fill="' + fg + '">' + escaped + '</text></svg>';
-  const dataUrl =
-    'data:image/svg+xml;base64,' + Buffer.from(svg, 'utf8').toString('base64');
-  return JSON.stringify({ type: 2, emoji: '', name: '', dataUrl: dataUrl });
-}
-
 // Memoizes the "Archive" folder id per parent within a single script run, so
 // several archived notes under the same project/Tasks folder only trigger one
 // findOrCreateFolder call instead of one each.
@@ -539,14 +450,13 @@ for (const project of projects) {
       }
     }
 
-    // A large project can be split across several calls to stay under the
+    // A large project is split across several calls to stay under the
     // command-line size a single executeNodeScript spawn can carry (see
     // MAX_PROJECT_PAYLOAD_CHARS in the outer plugin code) — each call only
-    // sees its own slice of project.notes, so only the LAST call for a
-    // project carries the full, authoritative set of current note ids
-    // (noteValidIds) and actually runs the orphan-deletion sweep. Earlier
-    // calls skip it entirely rather than risk deleting notes that simply
-    // belong to a different chunk.
+    // sees its own slice of project.notes, so only the call carrying the full,
+    // authoritative set of current note ids (noteValidIds) runs the
+    // orphan-deletion sweep. Earlier calls skip it entirely rather than risk
+    // deleting notes that simply belong to a different chunk.
     if (project.isLastChunk && Array.isArray(project.noteValidIds)) {
       const validNoteIds = new Set(project.noteValidIds);
       for (const [spNoteId, jn] of byNoteId.entries()) {
@@ -558,26 +468,23 @@ for (const project of projects) {
       }
     }
 
-    // Project icon + colour (opt-in). One-way, best-effort, last chunk only:
-    // read the folder's current icon and PUT only when it differs, so a sync
-    // that changed nothing here writes nothing. Wrapped in its own try/catch —
-    // the icon is cosmetic, so a failure here must not skip the task-note sync
-    // below or fail the project. It's recorded on projectResult.iconError.
-    if (project.isLastChunk && syncProjectIcons) {
+    // Project icon + colour (opt-in). project.icon arrives already built by the
+    // outer plugin code (buildProjectFolderIcon) as a serialized Joplin
+    // FolderIcon JSON string — the SVG tile is assembled there, not here, to
+    // keep this script's source small (it and the JSON args share one Windows
+    // command-line argument, see MAX_PROJECT_PAYLOAD_CHARS). One-way,
+    // best-effort, last chunk only: read the folder's current icon and PUT only
+    // when it differs. Wrapped in its own try/catch — the icon is cosmetic, so
+    // a failure here must not skip the task-note sync below or fail the
+    // project. Recorded on projectResult.iconError.
+    if (project.isLastChunk && syncProjectIcons && project.icon) {
       try {
-        const desiredIcon = buildProjectFolderIcon(
-          project.icon,
-          project.color,
-          project.title,
+        const current = await apiRequest(
+          'GET',
+          '/folders/' + folderId + '?fields=id,icon',
         );
-        if (desiredIcon) {
-          const current = await apiRequest(
-            'GET',
-            '/folders/' + folderId + '?fields=id,icon',
-          );
-          if (!current || current.icon !== desiredIcon) {
-            await apiRequest('PUT', '/folders/' + folderId, { icon: desiredIcon });
-          }
+        if (!current || current.icon !== project.icon) {
+          await apiRequest('PUT', '/folders/' + folderId, { icon: project.icon });
         }
       } catch (e) {
         projectResult.iconError = e.message;
@@ -745,14 +652,101 @@ function buildTaskBody(task, syncId) {
   return `${String(task.notes || '').trimEnd()}\n\n${TASK_MARKER_PREFIX}${syncId}${MARKER_SUFFIX}`;
 }
 
+// Parses "#rgb", "#rrggbb", "rgb(r,g,b)" or "rgba(r,g,b,a)" into [r,g,b];
+// returns null if it can't. Super Productivity stores project.theme.primary in
+// any of these forms depending on how the colour was picked.
+function parseColor(value) {
+  const s = String(value || '').trim().toLowerCase();
+  let m = s.match(/^#([0-9a-f]{3})$/);
+  if (m) {
+    return [0, 1, 2].map((i) => parseInt(m[1][i] + m[1][i], 16));
+  }
+  m = s.match(/^#([0-9a-f]{6})$/);
+  if (m) {
+    return [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
+  }
+  m = s.match(/^rgba?\(([^)]+)\)/);
+  if (m) {
+    const parts = m[1].split(',').map((p) => parseFloat(p.trim()));
+    if (parts.length >= 3 && parts.slice(0, 3).every((n) => isFinite(n))) {
+      return parts.slice(0, 3).map((n) => Math.max(0, Math.min(255, Math.round(n))));
+    }
+  }
+  return null;
+}
+
+// A subset of Super Productivity's Material Symbols icon names mapped to one
+// emoji, used as the glyph on the generated folder icon. Names not listed here
+// fall back to the first character of the project title. Lives in the outer
+// (browser-side) plugin code, not NODE_SYNC_SCRIPT, so its bulk doesn't count
+// against that script's Windows command-line budget.
+const PROJECT_ICON_EMOJI = {
+  inbox: '📥', person: '👤', people: '👥', group: '👥', groups: '👥',
+  chat: '💬', forum: '💬', mail: '✉️', email: '✉️',
+  home: '🏠', family_home: '🏡', cottage: '🏡',
+  work: '💼', business_center: '💼', cases: '💼',
+  code: '💻', code_blocks: '💻', terminal: '💻', bug_report: '🐛',
+  rocket_launch: '🚀', favorite: '❤️', star: '⭐',
+  school: '🎓', menu_book: '📖', book: '📖',
+  shopping_cart: '🛒', attach_money: '💰', savings: '💰', payments: '💰',
+  fitness_center: '🏋️', directions_run: '🏃', self_improvement: '🧘',
+  restaurant: '🍽️', local_cafe: '☕',
+  flight: '✈️', directions_car: '🚗', pets: '🐾',
+  potted_plant: '🪴', yard: '🌱', eco: '🌱', agriculture: '🚜', bucket_check: '🪣',
+  movie: '🎬', music_note: '🎵', sports_esports: '🎮', photo_camera: '📷',
+  palette: '🎨', build: '🔧', handyman: '🛠️', science: '🔬',
+  medical_services: '🩺', event: '📅', calendar_month: '📅',
+  checklist: '✅', task_alt: '✅', flag: '🚩', lightbulb: '💡', folder: '📁',
+};
+
+function projectIconGlyph(iconName, title) {
+  const key = String(iconName || '').trim().toLowerCase();
+  if (PROJECT_ICON_EMOJI[key]) return { text: PROJECT_ICON_EMOJI[key], emoji: true };
+  const letter = String(title || '').trim().charAt(0).toUpperCase();
+  return { text: letter || '•', emoji: false };
+}
+
+// Builds the serialized Joplin folder-icon value (a JSON string, the same form
+// Joplin's own UI writes) for a project: an SVG tile filled with the project's
+// theme colour carrying its icon glyph. Joplin notebooks have no colour field,
+// so this is the only channel for the colour. The SVG is embedded as a
+// percent-encoded (not base64) data URL — btoa can't take the multi-byte
+// emoji glyphs, and this avoids needing Buffer too. Returns '' when there's
+// nothing worth drawing (colour unparseable and no title for a letter).
+function buildProjectFolderIcon(iconName, color, title) {
+  const rgb = parseColor(color);
+  const glyph = projectIconGlyph(iconName, title);
+  if (!rgb && glyph.text === '•') return '';
+  const bg = rgb || [136, 136, 136];
+  const luma = (0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2]) / 255;
+  const fg = luma > 0.6 ? '#1b1b1b' : '#ffffff';
+  const hex = '#' + bg.map((n) => ('0' + n.toString(16)).slice(-2)).join('');
+  const size = glyph.emoji ? 38 : 40;
+  const escaped = glyph.text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">' +
+    '<rect width="64" height="64" rx="13" fill="' + hex + '"/>' +
+    '<text x="32" y="34" text-anchor="middle" dominant-baseline="central" ' +
+    'font-family="Arial, Helvetica, sans-serif" font-size="' + size + '" ' +
+    'font-weight="600" fill="' + fg + '">' + escaped + '</text></svg>';
+  const dataUrl = 'data:image/svg+xml,' + encodeURIComponent(svg);
+  return JSON.stringify({ type: 2, emoji: '', name: '', dataUrl: dataUrl });
+}
+
 // Conservative budget for one project chunk's JSON-stringified notes (or
 // taskNotes) array, in characters. Super Productivity's executeNodeScript
 // spawns Node with the whole script AND the JSON-stringified args embedded
 // in one Windows command-line argument (~32K chars, and quoting can inflate
-// that further for JSON-heavy text); NODE_SYNC_SCRIPT's own source already
-// accounts for a good chunk of that budget on its own. This leaves generous
-// headroom rather than trying to compute the limit exactly.
-const MAX_PROJECT_PAYLOAD_CHARS = 8000;
+// that further for JSON-heavy text). NODE_SYNC_SCRIPT's own source is the
+// biggest fixed cost, so derive the per-array budget from its actual length
+// rather than hardcoding a number: that way growing the script (which is what
+// caused a "spawn ENAMETOOLONG" when the project-icon code was first added to
+// it inline) automatically tightens the payload budget instead of silently
+// blowing the limit. ~5.6K with the current script, floored at 3K.
+const MAX_PROJECT_PAYLOAD_CHARS = Math.max(3000, 27000 - NODE_SYNC_SCRIPT.length);
 
 // Greedily packs items into chunks whose combined JSON size stays under
 // maxChars, preserving order. A single item larger than maxChars still gets
@@ -955,18 +949,14 @@ async function performSync(trigger) {
             .filter((item) => item !== null)
         : [];
 
-      return {
-        id: p.id,
-        title: p.title,
-        icon:
-          config.syncProjectIcons && typeof p.icon === 'string' ? p.icon : undefined,
-        color:
-          config.syncProjectIcons && p.theme && typeof p.theme.primary === 'string'
-            ? p.theme.primary
-            : undefined,
-        notes,
-        taskNotes,
-      };
+      // The folder-icon JSON is built here (outer code) and passed to the node
+      // script ready to use — see buildProjectFolderIcon. '' means "don't touch
+      // the folder icon".
+      const icon = config.syncProjectIcons
+        ? buildProjectFolderIcon(p.icon, p.theme && p.theme.primary, p.title)
+        : '';
+
+      return { id: p.id, title: p.title, icon, notes, taskNotes };
     })
     .filter((p) => p.notes.length > 0 || p.taskNotes.length > 0);
 
@@ -990,35 +980,68 @@ async function performSync(trigger) {
   // electron/plugin-node-executor.ts upstream) — on Windows that has a much
   // lower effective length limit than Linux/macOS, and there's no size cap on
   // args there (only the script text is capped at 100KB), so a large enough
-  // combined notes payload fails with "spawn ENAMETOOLONG". Keeping each call
-  // small regardless of how much is synced overall takes two things: one
-  // call per project (below), and, within a project, chunking its notes and
-  // taskNotes arrays so no single call's payload exceeds
-  // MAX_PROJECT_PAYLOAD_CHARS regardless of how much content or how many
-  // tasks that project has. Only the last chunk for a project carries the
-  // full valid-id lists and runs the orphan-deletion sweep (see
-  // NODE_SYNC_SCRIPT) — earlier chunks only create/update.
+  // payload fails with "spawn ENAMETOOLONG". Keeping every call small takes
+  // three things: one project per call, notes and task notes in separate
+  // calls (so the two can't add up), and chunking each of those arrays so no
+  // single call's payload exceeds MAX_PROJECT_PAYLOAD_CHARS. Only the call
+  // that carries the full valid-id list runs the orphan-deletion sweep (see
+  // NODE_SYNC_SCRIPT) — the rest only create/update.
   const results = [];
   let hardFailure = null;
   outer: for (const project of payloadProjects) {
-    const noteChunks = chunkBySize(project.notes, MAX_PROJECT_PAYLOAD_CHARS);
-    const taskChunks = chunkBySize(project.taskNotes, MAX_PROJECT_PAYLOAD_CHARS);
-    const chunkCount = Math.max(noteChunks.length, taskChunks.length);
+    // Build the list of executeNodeScript calls for this project. Notes and
+    // task notes go in SEPARATE calls, never combined — that's what bounds a
+    // single call's args at NODE_SYNC_SCRIPT + one chunk (MAX_PROJECT_PAYLOAD_
+    // CHARS) + fixed overhead, safely under the Windows command-line limit,
+    // regardless of how big the other array is. The note-orphan sweep rides
+    // the last notes call (it carries noteValidIds); the task-orphan sweep
+    // rides the last task call (taskValidIds), or — when this run has no task
+    // payload at all — piggybacks the last notes call so it still runs without
+    // an extra spawn. The project icon rides the project's very last call.
+    const projectCalls = [];
 
-    for (let i = 0; i < chunkCount; i++) {
-      const isLastChunk = i === chunkCount - 1;
-      const projectChunk = {
+    const noteChunks = chunkBySize(project.notes, MAX_PROJECT_PAYLOAD_CHARS);
+    noteChunks.forEach((chunk, i) => {
+      const last = i === noteChunks.length - 1;
+      projectCalls.push({
         id: project.id,
         title: project.title,
-        icon: isLastChunk ? project.icon : undefined,
-        color: isLastChunk ? project.color : undefined,
-        notes: noteChunks[i] || [],
-        taskNotes: taskChunks[i] || [],
-        isLastChunk,
-        noteValidIds: isLastChunk ? project.notes.map((n) => n.id) : undefined,
-        taskValidIds: isLastChunk ? project.taskNotes.map((t) => t.id) : undefined,
-      };
+        notes: chunk,
+        taskNotes: [],
+        isLastChunk: last,
+        noteValidIds: last ? project.notes.map((n) => n.id) : undefined,
+      });
+    });
 
+    const taskChunks = chunkBySize(project.taskNotes, MAX_PROJECT_PAYLOAD_CHARS);
+    const hasTaskPayload = taskChunks.some((c) => c.length > 0);
+    if (hasTaskPayload) {
+      const nonEmpty = taskChunks.filter((c) => c.length > 0);
+      nonEmpty.forEach((chunk, i) => {
+        const last = i === nonEmpty.length - 1;
+        projectCalls.push({
+          id: project.id,
+          title: project.title,
+          notes: [],
+          taskNotes: chunk,
+          isLastChunk: last,
+          taskValidIds: last ? project.taskNotes.map((t) => t.id) : undefined,
+        });
+      });
+    } else if (config.syncTaskNotes) {
+      // No task-note payload this run, but task sync is on — attach an empty
+      // taskValidIds to the last notes call so the orphan sweep for tasks
+      // deleted entirely on the SP side still happens.
+      projectCalls[projectCalls.length - 1].taskValidIds = project.taskNotes.map(
+        (t) => t.id,
+      );
+    }
+
+    if (project.icon) {
+      projectCalls[projectCalls.length - 1].icon = project.icon;
+    }
+
+    for (const projectChunk of projectCalls) {
       let outcome;
       try {
         outcome = await PluginAPI.executeNodeScript({

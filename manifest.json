@@ -2,7 +2,7 @@
   "id": "joplin-notes-sync",
   "name": "Joplin Notes Sync",
   "manifestVersion": 1,
-  "version": "1.8.0",
+  "version": "1.8.1",
   "minSupVersion": "18.15.0",
   "description": "Push project notes into a Joplin notebook via Joplin's local Web Clipper API, with optional task-note sync (one-way or two-way) and task tag sync. Desktop only.",
   "author": "BigWebstas",
