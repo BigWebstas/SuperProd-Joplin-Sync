@@ -8,6 +8,14 @@ The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Every user-visible change bumps `version` in both `manifest.json` and
 `package.json`.
 
+## [1.8.2] - 2026-09-09
+
+### Removed
+- The "Joplin Sync" button in Super Productivity's header. Sync still runs on
+  the interval, on config/note changes, and from the "Sync Now" button on the
+  plugin page. The `registerHeaderButton` permission is dropped from the
+  manifest — re-grant is not needed since nothing is added.
+
 ## [1.8.1] - 2026-09-02
 
 ### Fixed
