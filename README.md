@@ -46,8 +46,11 @@ your own notes in them.
 | Task notes (default) | two-way | most recently edited side wins, no merge |
 | Task notes with **One-way task notes** on | Super Productivity → Joplin only | Super Productivity always wins |
 | Task tags (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
+| Task due dates and done state (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 
-Completed tasks get a `[Done] ` prefix on their Joplin note title.
+Completed tasks get a `[Done] ` prefix on their Joplin note title — unless
+**Sync task due dates and done state** is on, in which case the task's Joplin
+note is a real to-do instead (see below) and the prefix is dropped.
 
 ## Project icons and colours
 
@@ -62,6 +65,18 @@ uses). The glyph is an emoji for common Super Productivity icons, or the first
 letter of the project title otherwise. Only projects that have at least one note
 to sync get an icon. Turning the option off later leaves icons already set in
 place.
+
+## Task due dates and done state
+
+With **Sync task due dates and done state** on (needs task-note sync), each
+task's Joplin note becomes a real to-do: Joplin's own checkbox and due-date
+field are set from the task, instead of just the `[Done] ` title prefix. A
+task's due date+time or due day is written to Joplin's `todo_due`, and its
+done state to `todo_completed`/the checkbox. This is one-way (Super
+Productivity → Joplin) and best-effort — Super Productivity has no field for
+"marked done at", so the completion timestamp is approximated from the task's
+own last-updated time. Due date/done edits made directly on the Joplin to-do
+are never read back.
 
 ## Matching
 

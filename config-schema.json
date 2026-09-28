@@ -53,6 +53,12 @@
       "title": "Sync project icons and colours",
       "description": "Give each project's Joplin sub-notebook a custom icon: the project's icon glyph on a tile filled with the project's theme colour. One-way (Super Productivity → Joplin). Joplin has no notebook colour field, so the colour is carried inside the icon image. Only projects that have at least one note to sync get their icon. Turning this off later leaves icons already set in place.",
       "default": false
+    },
+    "syncTaskDueDates": {
+      "type": "boolean",
+      "title": "Sync task due dates and done state",
+      "description": "Only takes effect when \"Sync task notes\" is on. Turns each task's Joplin note into a real to-do: its due date is set as Joplin's own to-do due date, and its checkbox follows the task's done state (replacing the \"[Done]\" title prefix). Always one-way (Super Productivity → Joplin) — due date/done changes made directly in Joplin are never read back.",
+      "default": false
     }
   },
   "required": []

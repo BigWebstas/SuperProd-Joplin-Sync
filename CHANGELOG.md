@@ -8,6 +8,17 @@ The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Every user-visible change bumps `version` in both `manifest.json` and
 `package.json`.
 
+## [1.9.0] - 2026-09-28
+
+### Added
+- **Sync task due dates and done state** setting (`syncTaskDueDates`, off by
+  default, needs "Sync task notes"). Each task's Joplin note becomes a real
+  to-do: due date+time or due day maps to Joplin's `todo_due`, and the task's
+  done state maps to `todo_completed`/the checkbox, instead of the
+  `[Done] ` title prefix. Always one-way (Super Productivity → Joplin).
+  These live in Joplin's native to-do fields, not the note body, so they
+  can't collide with the two-way task-notes content diff.
+
 ## [1.8.2] - 2026-09-09
 
 ### Removed

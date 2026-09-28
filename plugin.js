@@ -21,6 +21,12 @@
 // Productivity to write a Joplin-side tag change back to, so unlike task
 // note content there's no pull direction or conflict to resolve here.
 //
+// Task due dates and done state (opt-in via syncTaskDueDates, only takes
+// effect alongside syncTaskNotes) are also one-way (Super Productivity ->
+// Joplin), written onto the task's Joplin note as native to-do fields
+// (is_todo/todo_due/todo_completed) rather than into the note body — that
+// keeps them out of the two-way notes-content diff entirely.
+//
 // Calling updateTask on a schedule can race with Super Productivity's own
 // cross-device sync (on a multi-device setup, the two can collide on the
 // same task); an earlier version of this plugin reverted to one-way sync
@@ -54,6 +60,7 @@ const DEFAULTS = {
   syncTaskTags: false,
   archiveRemovedNotes: false,
   syncProjectIcons: false,
+  syncTaskDueDates: false,
 };
 
 // Matches sp-note-id / sp-task-id markers written into a note body (see
@@ -123,6 +130,12 @@ const archiveRemovedNotes = input.archiveRemovedNotes === true;
 // this off later leaves any icons already set in place (a one-way write, not a
 // tracked state) — same as archiveRemovedNotes.
 const syncProjectIcons = input.syncProjectIcons === true;
+// One-way (SP -> Joplin) sync of each task's due date and done state onto its
+// Joplin note's native to-do fields (is_todo/todo_due/todo_completed), rather
+// than into the note body — that keeps it clear of the two-way notes-content
+// diff in decideTaskAction, which assumes stripTaskMarker(body) is exactly
+// item's SP notes content. Only meaningful alongside syncTaskNotes.
+const syncTaskDueDates = input.syncTaskDueDates === true && syncTaskNotes;
 
 function apiRequest(method, path, body) {
   return new Promise((resolve, reject) => {
@@ -503,7 +516,10 @@ for (const project of projects) {
 
     if (syncTaskNotes) {
       const existingTaskNotes = tasksFolderId
-        ? await listAll('/folders/' + tasksFolderId + '/notes', 'id,title,body,updated_time')
+        ? await listAll(
+            '/folders/' + tasksFolderId + '/notes',
+            'id,title,body,updated_time,is_todo,todo_due,todo_completed',
+          )
         : [];
 
       const taskDedup = await dedupeByMarker(existingTaskNotes, TASK_MARKER_RE, tasksFolderId);
@@ -522,6 +538,19 @@ for (const project of projects) {
         // no-op don't), a stale title still needs fixing up on its own
         // rather than waiting for a future content change to carry it along.
         const titleStale = !!existing && existing.title !== item.title;
+        // Same reasoning as the title: due date/done state are SP-driven,
+        // one-way, and live in Joplin's own to-do fields rather than the
+        // body, so they need fixing up independently of the notes-content
+        // decision too (a due date can change with the notes text untouched).
+        const desiredTodo = syncTaskDueDates
+          ? { is_todo: 1, todo_due: item.todoDue || 0, todo_completed: item.todoCompleted || 0 }
+          : null;
+        const todoStale =
+          !!desiredTodo &&
+          !!existing &&
+          (existing.is_todo !== desiredTodo.is_todo ||
+            existing.todo_due !== desiredTodo.todo_due ||
+            existing.todo_completed !== desiredTodo.todo_completed);
 
         switch (decision.action) {
           case 'create': {
@@ -530,6 +559,7 @@ for (const project of projects) {
               title: item.title,
               body: item.body,
               parent_id: tasksFolderId,
+              ...(desiredTodo || {}),
             });
             projectResult.created += 1;
             projectResult.taskNotesSynced[item.id] = spContent;
@@ -540,6 +570,7 @@ for (const project of projects) {
             await apiRequest('PUT', '/notes/' + existing.id, {
               title: item.title,
               body: item.body,
+              ...(desiredTodo || {}),
             });
             projectResult.updated += 1;
             projectResult.taskNotesSynced[item.id] = spContent;
@@ -552,17 +583,24 @@ for (const project of projects) {
             projectResult.taskNotesSynced[item.id] = '';
             break;
           }
-          case 'pull':
-            if (titleStale) {
-              await apiRequest('PUT', '/notes/' + existing.id, { title: item.title });
+          case 'pull': {
+            const patch = {};
+            if (titleStale) patch.title = item.title;
+            if (todoStale) Object.assign(patch, desiredTodo);
+            if (Object.keys(patch).length) {
+              await apiRequest('PUT', '/notes/' + existing.id, patch);
               projectResult.updated += 1;
             }
             if (syncTaskTags) await syncNoteTags(existing.id, item.tagTitles || []);
             projectResult.taskNotesPulled.push({ taskId: item.id, content: decision.content });
             break;
-          default:
-            if (titleStale) {
-              await apiRequest('PUT', '/notes/' + existing.id, { title: item.title });
+          }
+          default: {
+            const patch = {};
+            if (titleStale) patch.title = item.title;
+            if (todoStale) Object.assign(patch, desiredTodo);
+            if (Object.keys(patch).length) {
+              await apiRequest('PUT', '/notes/' + existing.id, patch);
               projectResult.updated += 1;
             } else {
               projectResult.unchanged += 1;
@@ -571,6 +609,7 @@ for (const project of projects) {
             if (decision.syncedContent !== undefined) {
               projectResult.taskNotesSynced[item.id] = decision.syncedContent;
             }
+          }
         }
       }
 
@@ -650,6 +689,22 @@ function buildBody(note) {
 
 function buildTaskBody(task, syncId) {
   return `${String(task.notes || '').trimEnd()}\n\n${TASK_MARKER_PREFIX}${syncId}${MARKER_SUFFIX}`;
+}
+
+// Due date, in ms since epoch, or 0 if the task has none. Super Productivity
+// stores a due date+time as `dueWithTime` (ms) and a date-only due day as
+// `dueDay` ('YYYY-MM-DD'); a date-only due day is normalized to local
+// midnight of that day so Joplin's todo_due (a single timestamp) has
+// something sane to show.
+function computeTaskDueMs(task) {
+  if (typeof task.dueWithTime === 'number' && task.dueWithTime > 0) {
+    return task.dueWithTime;
+  }
+  if (typeof task.dueDay === 'string' && task.dueDay) {
+    const ms = new Date(`${task.dueDay}T00:00:00`).getTime();
+    return Number.isNaN(ms) ? 0 : ms;
+  }
+  return 0;
 }
 
 // Parses "#rgb", "#rrggbb", "rgb(r,g,b)" or "rgba(r,g,b,a)" into [r,g,b];
@@ -807,6 +862,7 @@ async function loadEffectiveConfig() {
     syncTaskTags: cfg.syncTaskTags === true,
     archiveRemovedNotes: cfg.archiveRemovedNotes === true,
     syncProjectIcons: cfg.syncProjectIcons === true,
+    syncTaskDueDates: cfg.syncTaskDueDates === true,
   };
 }
 
@@ -933,9 +989,15 @@ async function performSync(trigger) {
               // script, and every duplicated byte here counts against the
               // Windows command-line length that executeNodeScript's spawn
               // call is limited by (see MAX_PROJECT_PAYLOAD_CHARS below).
+              // With syncTaskDueDates on, the Joplin note becomes a real to-do
+              // (checkbox + due date), which already shows completion, so the
+              // "[Done] " title prefix is redundant there and dropped.
+              const title = config.syncTaskDueDates
+                ? t.title || 'Untitled task'
+                : (t.isDone ? '[Done] ' : '') + (t.title || 'Untitled task');
               return {
                 id: syncId,
-                title: (t.isDone ? '[Done] ' : '') + (t.title || 'Untitled task'),
+                title,
                 body: buildTaskBody(t, syncId),
                 spUpdated: t.updated || t.created || 0,
                 lastSynced,
@@ -943,6 +1005,15 @@ async function performSync(trigger) {
                   ? (t.tagIds || [])
                       .map((tagId) => tagsById[tagId] && tagsById[tagId].title)
                       .filter((title) => !!title)
+                  : undefined,
+                // Joplin's todo_due/todo_completed are only meaningful once
+                // is_todo is set, so both travel together under one flag (see
+                // NODE_SYNC_SCRIPT). todo_completed is approximated with the
+                // task's own updated/created timestamp — Super Productivity
+                // has no separate "marked done at" field to read instead.
+                todoDue: config.syncTaskDueDates ? computeTaskDueMs(t) : undefined,
+                todoCompleted: config.syncTaskDueDates
+                  ? (t.isDone ? t.updated || t.created || Date.now() : 0)
                   : undefined,
               };
             })
@@ -1058,6 +1129,7 @@ async function performSync(trigger) {
               pullsAllowed,
               archiveRemovedNotes: config.archiveRemovedNotes,
               syncProjectIcons: config.syncProjectIcons,
+              syncTaskDueDates: config.syncTaskDueDates,
             },
           ],
           timeout: 25000,
