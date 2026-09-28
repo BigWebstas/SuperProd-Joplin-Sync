@@ -8,6 +8,29 @@ The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Every user-visible change bumps `version` in both `manifest.json` and
 `package.json`.
 
+## [1.10.0] - 2026-09-28
+
+### Added
+- **Sync subtasks as a checklist** setting (`syncTaskSubtasks`, off by
+  default, needs "Sync task notes"). Appends a markdown checklist of each
+  task's subtasks to the bottom of its Joplin note.
+- **Sync task time estimate/spent** setting (`syncTaskTimeStats`, off by
+  default, needs "Sync task notes"). Appends a one-line time-tracking summary
+  to the bottom of each task's Joplin note.
+- **Sync a project task index note** setting (`syncProjectIndex`, off by
+  default, needs "Sync task notes"). Creates an "Overview" note per project
+  linking every one of its task notes.
+
+  All three are one-way (Super Productivity → Joplin) and regenerated in full
+  on every sync. The subtask checklist and time stats live in their own
+  delimited block in the note body (separate from the notes text itself), so
+  they can't collide with the two-way task-notes content diff.
+
+### Fixed
+- `syncTaskDueDates`'s `todo_completed` timestamp now uses the task's own
+  "marked done at" field (`doneOn`) when available, instead of only
+  approximating it from `updated`/`created`.
+
 ## [1.9.0] - 2026-09-28
 
 ### Added

@@ -47,6 +47,9 @@ your own notes in them.
 | Task notes with **One-way task notes** on | Super Productivity → Joplin only | Super Productivity always wins |
 | Task tags (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 | Task due dates and done state (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
+| Task subtask checklist (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
+| Task time estimate/spent (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
+| Project task index note (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 
 Completed tasks get a `[Done] ` prefix on their Joplin note title — unless
 **Sync task due dates and done state** is on, in which case the task's Joplin
@@ -72,11 +75,32 @@ With **Sync task due dates and done state** on (needs task-note sync), each
 task's Joplin note becomes a real to-do: Joplin's own checkbox and due-date
 field are set from the task, instead of just the `[Done] ` title prefix. A
 task's due date+time or due day is written to Joplin's `todo_due`, and its
-done state to `todo_completed`/the checkbox. This is one-way (Super
-Productivity → Joplin) and best-effort — Super Productivity has no field for
-"marked done at", so the completion timestamp is approximated from the task's
-own last-updated time. Due date/done edits made directly on the Joplin to-do
-are never read back.
+done state to `todo_completed`/the checkbox (using the task's own "marked done
+at" timestamp, falling back to its last-updated time for older tasks that
+predate that field). This is one-way (Super Productivity → Joplin). Due
+date/done edits made directly on the Joplin to-do are never read back.
+
+## Subtasks and time stats
+
+With **Sync subtasks as a checklist** on (needs task-note sync), each task's
+Joplin note gets a markdown checklist of its subtasks appended to the bottom,
+with each one's own done state as the checkbox. With **Sync task time
+estimate/spent** on, a one-line summary ("2h 15m logged / 4h estimated") is
+appended instead/as well. Both are one-way (Super Productivity → Joplin),
+regenerated in full on every sync — so edits to either in Joplin don't stick,
+and neither is meant to be edited there.
+
+Both live in their own delimited block between the task's own notes and its
+hidden `sp-task-id` marker, kept separate from the notes text itself so they
+never get mistaken for a Joplin-side edit to the notes (see syncTaskNotes's
+two-way diff, above).
+
+## Project task index note
+
+With **Sync a project task index note** on (needs task-note sync), each
+project's Joplin sub-notebook gets an "Overview" note listing a link to every
+one of its task notes — handy once a project has more than a couple. One-way
+(Super Productivity → Joplin), regenerated in full on every sync.
 
 ## Matching
 

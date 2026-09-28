@@ -27,6 +27,13 @@
 // (is_todo/todo_due/todo_completed) rather than into the note body — that
 // keeps them out of the two-way notes-content diff entirely.
 //
+// A task's subtask checklist and time estimate/spent (opt-in via
+// syncTaskSubtasks/syncTaskTimeStats) are also one-way, appended to the note
+// body but inside their own sp-task-meta comment block so the two-way diff's
+// stripTaskMarker can strip them back out, same reasoning as the marker
+// itself. A per-project task index note (opt-in via syncProjectIndex) is
+// likewise one-way and regenerated in full every sync.
+//
 // Calling updateTask on a schedule can race with Super Productivity's own
 // cross-device sync (on a multi-device setup, the two can collide on the
 // same task); an earlier version of this plugin reverted to one-way sync
@@ -61,6 +68,9 @@ const DEFAULTS = {
   archiveRemovedNotes: false,
   syncProjectIcons: false,
   syncTaskDueDates: false,
+  syncTaskSubtasks: false,
+  syncTaskTimeStats: false,
+  syncProjectIndex: false,
 };
 
 // Matches sp-note-id / sp-task-id markers written into a note body (see
@@ -72,6 +82,16 @@ const DEFAULTS = {
 const MARKER_PREFIX = '<!-- sp-note-id:';
 const TASK_MARKER_PREFIX = '<!-- sp-task-id:';
 const MARKER_SUFFIX = ' -->';
+
+// Wraps optional decorative content (subtask checklist, time stats — see
+// syncTaskSubtasks/syncTaskTimeStats) appended between a task's own notes and
+// its sp-task-id marker. Kept in its own delimited block, rather than mixed
+// straight into the notes text, so the Node script's stripTaskMarker can strip
+// it back out before the two-way notes-content diff runs — without that, an
+// edit to a subtask elsewhere would look like the user edited the task's notes
+// in Joplin, and a pull would overwrite the notes field with the checklist.
+const TASK_META_PREFIX = '<!-- sp-task-meta:start -->';
+const TASK_META_SUFFIX = '<!-- sp-task-meta:end -->';
 
 // Calendar-imported tasks (Super Productivity's Google/ICS calendar
 // integration) get one task id per event *occurrence*, e.g.
@@ -136,6 +156,13 @@ const syncProjectIcons = input.syncProjectIcons === true;
 // diff in decideTaskAction, which assumes stripTaskMarker(body) is exactly
 // item's SP notes content. Only meaningful alongside syncTaskNotes.
 const syncTaskDueDates = input.syncTaskDueDates === true && syncTaskNotes;
+// One-way (SP -> Joplin), best-effort project-level "table of contents" note
+// listing every task note currently in the project's Tasks sub-notebook.
+// Rebuilt in full on the project's very last executeNodeScript call (see
+// isProjectFinalCall in the outer plugin code) since notes and task notes can
+// arrive in separate calls (see MAX_PROJECT_PAYLOAD_CHARS chunking) and only
+// the last call is guaranteed to see every note already synced this run.
+const syncProjectIndex = input.syncProjectIndex === true && syncTaskNotes;
 
 function apiRequest(method, path, body) {
   return new Promise((resolve, reject) => {
@@ -347,9 +374,19 @@ async function syncNoteTags(noteId, desiredTitles) {
 // synced note for that task permanently unrecognizable on the next sync.
 const MARKER_RE = /<!--\\s*sp-note-id:(\\S+)\\s*-->/;
 const TASK_MARKER_RE = /<!--\\s*sp-task-id:(\\S+)\\s*-->/;
+// Matches the whole sp-task-meta block (see TASK_META_PREFIX/SUFFIX and
+// buildTaskDecoration in the outer plugin code) so it can be stripped out
+// before the two-way notes-content diff, same reasoning as TASK_MARKER_RE.
+const TASK_META_RE = /<!--\\s*sp-task-meta:start\\s*-->[\\s\\S]*?<!--\\s*sp-task-meta:end\\s*-->/;
+const PROJECT_INDEX_MARKER_RE = /<!--\\s*sp-project-index\\s*-->/;
+const PROJECT_INDEX_MARKER = '<!-- sp-project-index -->';
+const PROJECT_INDEX_TITLE = 'Overview';
 
 function stripTaskMarker(body) {
-  return String(body || '').replace(TASK_MARKER_RE, '').trim();
+  return String(body || '')
+    .replace(TASK_MARKER_RE, '')
+    .replace(TASK_META_RE, '')
+    .trim();
 }
 
 // A task that was touched very recently is more likely to still be mid-
@@ -426,6 +463,7 @@ for (const project of projects) {
     unchanged: 0,
     error: null,
     iconError: null,
+    indexError: null,
     taskNotesSynced: {},
     taskNotesPulled: [],
   };
@@ -513,6 +551,10 @@ for (const project of projects) {
     // Actual creation stays deferred to the first real create, so projects
     // that never use this feature still get no folder.
     let tasksFolderId = syncTaskNotes ? await findFolder('Tasks', folderId) : null;
+    // Declared outside the if so syncProjectIndex (below) can still read it on
+    // a run where syncTaskNotes is on but this particular call has no Tasks
+    // folder yet (an empty Map just means "no task links in the index").
+    let byTaskId = new Map();
 
     if (syncTaskNotes) {
       const existingTaskNotes = tasksFolderId
@@ -523,7 +565,7 @@ for (const project of projects) {
         : [];
 
       const taskDedup = await dedupeByMarker(existingTaskNotes, TASK_MARKER_RE, tasksFolderId);
-      const byTaskId = taskDedup.byId;
+      byTaskId = taskDedup.byId;
       projectResult.archived += taskDedup.archived;
       projectResult.deleted += taskDedup.deleted;
 
@@ -564,6 +606,10 @@ for (const project of projects) {
             projectResult.created += 1;
             projectResult.taskNotesSynced[item.id] = spContent;
             if (syncTaskTags) await syncNoteTags(created.id, item.tagTitles || []);
+            // byTaskId only reflects the folder listing taken at the top of
+            // this call, so a note created just now needs adding by hand —
+            // syncProjectIndex (built after this loop) reads straight from it.
+            byTaskId.set(item.id, Object.assign({ id: created.id, title: item.title, body: item.body }, desiredTodo || {}));
             break;
           }
           case 'update':
@@ -575,12 +621,16 @@ for (const project of projects) {
             projectResult.updated += 1;
             projectResult.taskNotesSynced[item.id] = spContent;
             if (syncTaskTags) await syncNoteTags(existing.id, item.tagTitles || []);
+            existing.title = item.title;
+            existing.body = item.body;
+            if (desiredTodo) Object.assign(existing, desiredTodo);
             break;
           case 'delete': {
             const archived = await removeOrArchive(existing.id, tasksFolderId);
             if (archived) projectResult.archived += 1;
             else projectResult.deleted += 1;
             projectResult.taskNotesSynced[item.id] = '';
+            byTaskId.delete(item.id);
             break;
           }
           case 'pull': {
@@ -590,6 +640,7 @@ for (const project of projects) {
             if (Object.keys(patch).length) {
               await apiRequest('PUT', '/notes/' + existing.id, patch);
               projectResult.updated += 1;
+              Object.assign(existing, patch);
             }
             if (syncTaskTags) await syncNoteTags(existing.id, item.tagTitles || []);
             projectResult.taskNotesPulled.push({ taskId: item.id, content: decision.content });
@@ -602,6 +653,7 @@ for (const project of projects) {
             if (Object.keys(patch).length) {
               await apiRequest('PUT', '/notes/' + existing.id, patch);
               projectResult.updated += 1;
+              Object.assign(existing, patch);
             } else {
               projectResult.unchanged += 1;
             }
@@ -624,6 +676,43 @@ for (const project of projects) {
             else projectResult.deleted += 1;
           }
         }
+      }
+    }
+
+    // Project-level "table of contents" note (opt-in, best-effort — a failure
+    // here must not fail the note/task sync above). Only meaningful once the
+    // project's very last call for this run has landed (see syncProjectIndex
+    // above), since byTaskId only reflects the notes this call's earlier
+    // findOrCreateFolder/listAll calls know about, and this project may have
+    // made a separate earlier call for its notes/other task chunks.
+    if (syncProjectIndex && project.isProjectFinalCall) {
+      try {
+        const taskLinks = Array.from(byTaskId.values())
+          .sort((a, b) => String(a.title).localeCompare(String(b.title)))
+          .map((jn) => '- [' + jn.title + '](:/' + jn.id + ')');
+        const indexBody =
+          (taskLinks.length > 0
+            ? ['# Tasks', ''].concat(taskLinks).join('\\n')
+            : '_No task notes yet._') + '\\n\\n' + PROJECT_INDEX_MARKER;
+        const existingIndexNote = existingNotes.find((n) =>
+          PROJECT_INDEX_MARKER_RE.test(n.body),
+        );
+        if (existingIndexNote) {
+          if (existingIndexNote.body !== indexBody) {
+            await apiRequest('PUT', '/notes/' + existingIndexNote.id, {
+              title: PROJECT_INDEX_TITLE,
+              body: indexBody,
+            });
+          }
+        } else {
+          await apiRequest('POST', '/notes', {
+            title: PROJECT_INDEX_TITLE,
+            body: indexBody,
+            parent_id: folderId,
+          });
+        }
+      } catch (e) {
+        projectResult.indexError = e.message;
       }
     }
   } catch (e) {
@@ -687,8 +776,52 @@ function buildBody(note) {
   return `${String(note.content || '').trimEnd()}\n\n${MARKER_PREFIX}${note.id}${MARKER_SUFFIX}`;
 }
 
-function buildTaskBody(task, syncId) {
-  return `${String(task.notes || '').trimEnd()}\n\n${TASK_MARKER_PREFIX}${syncId}${MARKER_SUFFIX}`;
+// `decoration`, if given, is a pre-built markdown string (see
+// buildTaskDecoration) wrapped in its own TASK_META markers between the
+// task's notes and the sp-task-id marker.
+function buildTaskBody(task, syncId, decoration) {
+  const notes = String(task.notes || '').trimEnd();
+  const decoBlock = decoration
+    ? `\n\n${TASK_META_PREFIX}\n${decoration}\n${TASK_META_SUFFIX}`
+    : '';
+  return `${notes}${decoBlock}\n\n${TASK_MARKER_PREFIX}${syncId}${MARKER_SUFFIX}`;
+}
+
+// Combines the subtask checklist and time-stats decorations (each opt-in) into
+// one markdown block, or '' if both are off/empty. tasksById resolves each
+// subtask id to its own task record (subtasks are just tasks with a parentId).
+function buildTaskDecoration(task, config, tasksById) {
+  const blocks = [];
+
+  if (config.syncTaskSubtasks) {
+    const subtasks = (task.subTaskIds || [])
+      .map((id) => tasksById[id])
+      .filter((st) => !!st);
+    if (subtasks.length > 0) {
+      const lines = subtasks.map(
+        (st) => `- [${st.isDone ? 'x' : ' '}] ${st.title || 'Untitled task'}`,
+      );
+      blocks.push(['**Subtasks**', ...lines].join('\n'));
+    }
+  }
+
+  if (config.syncTaskTimeStats && (task.timeEstimate > 0 || task.timeSpent > 0)) {
+    blocks.push(
+      `⏱ ${formatDuration(task.timeSpent)} logged / ${formatDuration(task.timeEstimate)} estimated`,
+    );
+  }
+
+  return blocks.join('\n\n');
+}
+
+// Renders a duration in ms as e.g. "2h 15m", "45m", or "0m" — good enough for
+// a one-line summary, not meant to match Super Productivity's own formatter.
+function formatDuration(ms) {
+  const totalMinutes = Math.round((ms || 0) / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours <= 0) return `${minutes}m`;
+  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
 }
 
 // Due date, in ms since epoch, or 0 if the task has none. Super Productivity
@@ -863,6 +996,9 @@ async function loadEffectiveConfig() {
     archiveRemovedNotes: cfg.archiveRemovedNotes === true,
     syncProjectIcons: cfg.syncProjectIcons === true,
     syncTaskDueDates: cfg.syncTaskDueDates === true,
+    syncTaskSubtasks: cfg.syncTaskSubtasks === true,
+    syncTaskTimeStats: cfg.syncTaskTimeStats === true,
+    syncProjectIndex: cfg.syncProjectIndex === true,
   };
 }
 
@@ -998,7 +1134,7 @@ async function performSync(trigger) {
               return {
                 id: syncId,
                 title,
-                body: buildTaskBody(t, syncId),
+                body: buildTaskBody(t, syncId, buildTaskDecoration(t, config, tasksById)),
                 spUpdated: t.updated || t.created || 0,
                 lastSynced,
                 tagTitles: syncTaskTags
@@ -1008,12 +1144,12 @@ async function performSync(trigger) {
                   : undefined,
                 // Joplin's todo_due/todo_completed are only meaningful once
                 // is_todo is set, so both travel together under one flag (see
-                // NODE_SYNC_SCRIPT). todo_completed is approximated with the
-                // task's own updated/created timestamp — Super Productivity
-                // has no separate "marked done at" field to read instead.
+                // NODE_SYNC_SCRIPT). todo_completed prefers the task's own
+                // "marked done at" timestamp (doneOn), falling back to
+                // updated/created for older tasks that predate that field.
                 todoDue: config.syncTaskDueDates ? computeTaskDueMs(t) : undefined,
                 todoCompleted: config.syncTaskDueDates
-                  ? (t.isDone ? t.updated || t.created || Date.now() : 0)
+                  ? (t.isDone ? t.doneOn || t.updated || t.created || Date.now() : 0)
                   : undefined,
               };
             })
@@ -1112,6 +1248,12 @@ async function performSync(trigger) {
       projectCalls[projectCalls.length - 1].icon = project.icon;
     }
 
+    // Marks the one call, of possibly several, that's truly last for this
+    // project this run — notes and task notes can land in separate calls (see
+    // above), so only this one is guaranteed to see every note already synced
+    // this run when building the project index (see syncProjectIndex).
+    projectCalls[projectCalls.length - 1].isProjectFinalCall = true;
+
     for (const projectChunk of projectCalls) {
       let outcome;
       try {
@@ -1130,6 +1272,7 @@ async function performSync(trigger) {
               archiveRemovedNotes: config.archiveRemovedNotes,
               syncProjectIcons: config.syncProjectIcons,
               syncTaskDueDates: config.syncTaskDueDates,
+              syncProjectIndex: config.syncProjectIndex,
             },
           ],
           timeout: 25000,
