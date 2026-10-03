@@ -57,7 +57,7 @@
     "syncTaskDueDates": {
       "type": "boolean",
       "title": "Sync task due dates and done state",
-      "description": "Only takes effect when \"Sync task notes\" is on. Turns each task's Joplin note into a real to-do: its due date is set as Joplin's own to-do due date, and its checkbox follows the task's done state (replacing the \"[Done]\" title prefix). Always one-way (Super Productivity → Joplin) — due date/done changes made directly in Joplin are never read back.",
+      "description": "Only takes effect when \"Sync task notes\" is on. Turns each task's Joplin note into a real to-do: its due date is set as Joplin's own to-do due date, and its checkbox follows the task's done state (replacing the \"[Done]\" title prefix). The due date is one-way (Super Productivity → Joplin). The done state is two-way unless \"One-way task notes\" is on: ticking or unticking the to-do in Joplin marks the task done or not done in Super Productivity.",
       "default": false
     },
     "syncTaskSubtasks": {
@@ -70,6 +70,12 @@
       "type": "boolean",
       "title": "Sync task time estimate/spent",
       "description": "Only takes effect when \"Sync task notes\" is on. Appends a one-line time-tracking summary (time logged vs. estimated) to the bottom of each task's Joplin note. Always one-way (Super Productivity → Joplin).",
+      "default": false
+    },
+    "syncTaskAttachments": {
+      "type": "boolean",
+      "title": "Sync task attachments as links",
+      "description": "Only takes effect when \"Sync task notes\" is on. Appends a list of each task's attachments to the bottom of its Joplin note: links, images (web images shown inline) and local files (as file:// links — the files themselves aren't copied into Joplin). Always one-way (Super Productivity → Joplin).",
       "default": false
     },
     "syncProjectIndex": {

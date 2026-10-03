@@ -22,10 +22,15 @@
 // note content there's no pull direction or conflict to resolve here.
 //
 // Task due dates and done state (opt-in via syncTaskDueDates, only takes
-// effect alongside syncTaskNotes) are also one-way (Super Productivity ->
-// Joplin), written onto the task's Joplin note as native to-do fields
-// (is_todo/todo_due/todo_completed) rather than into the note body — that
-// keeps them out of the two-way notes-content diff entirely.
+// effect alongside syncTaskNotes) are written onto the task's Joplin note as
+// native to-do fields (is_todo/todo_due/todo_completed) rather than into the
+// note body — that keeps them out of the two-way notes-content diff entirely.
+// Due dates are one-way. Done state follows task notes: two-way by default
+// (with its own baseline, TASK_SYNC_STATE_KEY's `done` map), one-way when
+// taskNotesOneWay is on.
+//
+// Every synced note's Joplin created/updated dates (user_created_time/
+// user_updated_time) are set from the Super Productivity note or task.
 //
 // A task's subtask checklist and time estimate/spent (opt-in via
 // syncTaskSubtasks/syncTaskTimeStats) are also one-way, appended to the note
@@ -55,7 +60,7 @@
 
 // Keep in step with manifest.json/package.json: the plugin can't read its own
 // manifest, so this is what the update check compares against.
-const PLUGIN_VERSION = '1.11.0';
+const PLUGIN_VERSION = '1.12.0';
 const RELEASES_API_URL =
   'https://api.github.com/repos/BigWebstas/SuperProd-Joplin-Sync/releases/latest';
 
@@ -76,6 +81,7 @@ const DEFAULTS = {
   syncTaskDueDates: false,
   syncTaskSubtasks: false,
   syncTaskTimeStats: false,
+  syncTaskAttachments: false,
   syncProjectIndex: false,
 };
 
@@ -118,7 +124,9 @@ function normalizeTaskId(id) {
 // Kept dependency-free (only Node built-ins) since the sandbox only allows
 // fs/path/os via `require` for trivial scripts — anything else (like this)
 // runs as a full child process instead, which does have full module access.
-const NODE_SYNC_SCRIPT = `
+// Comment lines and indentation are stripped before sending (see
+// compactNodeScript), so comments here cost nothing against the size budget.
+const NODE_SYNC_SCRIPT = compactNodeScript(`
 const http = require('http');
 const https = require('https');
 
@@ -162,6 +170,10 @@ const syncProjectIcons = input.syncProjectIcons === true;
 // diff in decideTaskAction, which assumes stripTaskMarker(body) is exactly
 // item's SP notes content. Only meaningful alongside syncTaskNotes.
 const syncTaskDueDates = input.syncTaskDueDates === true && syncTaskNotes;
+// Ticking/unticking a task's Joplin to-do is pulled back into the task's done
+// state, alongside two-way notes; one-way task notes keep it push-only. Uses its
+// own done baseline (item.lastSyncedDone), see decideTaskAction's reasoning.
+const twoWayDone = syncTaskDueDates && !taskNotesOneWay;
 // One-way (SP -> Joplin), best-effort project-level "table of contents" note
 // listing every task note currently in the project's Tasks sub-notebook.
 // Rebuilt in full on the project's very last executeNodeScript call (see
@@ -403,6 +415,19 @@ function stripTaskMarker(body) {
 // land on top of an incoming remote sync for the same task.
 const PULL_SETTLE_MS = 2 * 60 * 1000;
 
+function canPullTask(item) {
+  return pullsAllowed && Date.now() - item.spUpdated >= PULL_SETTLE_MS;
+}
+
+// Joplin's user-facing created/updated dates, set from the SP item so sorting
+// and date search in Joplin reflect the real ages rather than the sync time.
+function noteDates(item) {
+  const d = {};
+  if (item.created) d.user_created_time = item.created;
+  if (item.spUpdated) d.user_updated_time = item.spUpdated;
+  return d;
+}
+
 // Decides what to do with one task's note given its current content on both
 // sides and the content both sides agreed on last sync (item.lastSynced,
 // null if never synced). Only the side that actually moved away from that
@@ -433,8 +458,7 @@ function decideTaskAction(item, existingNote, ctx) {
   const spChanged = lastSynced === null || spContent !== lastSynced;
   const joplinChanged = lastSynced === null || joplinContent !== lastSynced;
 
-  const canPull =
-    ctx.pullsAllowed && Date.now() - item.spUpdated >= PULL_SETTLE_MS;
+  const canPull = canPullTask(item);
 
   if (spChanged && !joplinChanged) {
     return spContent === '' ? { action: 'delete' } : { action: 'update' };
@@ -472,12 +496,14 @@ for (const project of projects) {
     indexError: null,
     taskNotesSynced: {},
     taskNotesPulled: [],
+    taskDoneSynced: {},
+    taskDonePulled: [],
   };
   try {
     const folderId = await findOrCreateFolder(project.title, rootFolderId);
     const existingNotes = await listAll(
       '/folders/' + folderId + '/notes',
-      'id,title,body,updated_time',
+      'id,title,body,updated_time,user_created_time',
     );
 
     const noteDedup = await dedupeByMarker(existingNotes, MARKER_RE, folderId);
@@ -488,10 +514,15 @@ for (const project of projects) {
     for (const note of project.notes) {
       const existing = byNoteId.get(note.id);
       if (existing) {
-        if (existing.body !== note.body || existing.title !== note.title) {
+        if (
+          existing.body !== note.body ||
+          existing.title !== note.title ||
+          (note.created && existing.user_created_time !== note.created)
+        ) {
           await apiRequest('PUT', '/notes/' + existing.id, {
             title: note.title,
             body: note.body,
+            ...noteDates(note),
           });
           projectResult.updated += 1;
         } else {
@@ -502,6 +533,7 @@ for (const project of projects) {
           title: note.title,
           body: note.body,
           parent_id: folderId,
+          ...noteDates(note),
         });
         projectResult.created += 1;
       }
@@ -566,7 +598,7 @@ for (const project of projects) {
       const existingTaskNotes = tasksFolderId
         ? await listAll(
             '/folders/' + tasksFolderId + '/notes',
-            'id,title,body,updated_time,is_todo,todo_due,todo_completed',
+            'id,title,body,updated_time,user_created_time,is_todo,todo_due,todo_completed',
           )
         : [];
 
@@ -577,7 +609,7 @@ for (const project of projects) {
 
       for (const item of taskNotes) {
         const existing = byTaskId.get(item.id) || null;
-        const decision = decideTaskAction(item, existing, { pullsAllowed, oneWay: taskNotesOneWay });
+        const decision = decideTaskAction(item, existing, { oneWay: taskNotesOneWay });
         const spContent = stripTaskMarker(item.body);
         // The title (e.g. a "[Done]" prefix toggling when a task is
         // completed) is SP-driven and one-way, independent of the two-way
@@ -593,6 +625,23 @@ for (const project of projects) {
         const desiredTodo = syncTaskDueDates
           ? { is_todo: 1, todo_due: item.todoDue || 0, todo_completed: item.todoCompleted || 0 }
           : null;
+        // Done state goes two-way when only the Joplin checkbox moved away from
+        // the last agreed value: keep Joplin's value (so the push below doesn't
+        // revert it) and pull it once the task has settled. Without a baseline
+        // (first sync, or older plugin versions) SP wins, as before.
+        let donePull = null;
+        let doneDeferred = false;
+        if (twoWayDone && desiredTodo && existing && existing.is_todo) {
+          const joplinDone = existing.todo_completed > 0;
+          const spDone = desiredTodo.todo_completed > 0;
+          if (joplinDone !== spDone && item.lastSyncedDone === spDone) {
+            desiredTodo.todo_completed = existing.todo_completed;
+            if (canPullTask(item)) donePull = joplinDone;
+            else doneDeferred = true;
+          }
+        }
+        const createdStale =
+          !!existing && !!item.created && existing.user_created_time !== item.created;
         const todoStale =
           !!desiredTodo &&
           !!existing &&
@@ -608,6 +657,7 @@ for (const project of projects) {
               body: item.body,
               parent_id: tasksFolderId,
               ...(desiredTodo || {}),
+              ...noteDates(item),
             });
             projectResult.created += 1;
             projectResult.taskNotesSynced[item.id] = spContent;
@@ -623,6 +673,7 @@ for (const project of projects) {
               title: item.title,
               body: item.body,
               ...(desiredTodo || {}),
+              ...noteDates(item),
             });
             projectResult.updated += 1;
             projectResult.taskNotesSynced[item.id] = spContent;
@@ -643,6 +694,8 @@ for (const project of projects) {
             const patch = {};
             if (titleStale) patch.title = item.title;
             if (todoStale) Object.assign(patch, desiredTodo);
+            // Not noteDates: the Joplin edit being pulled is newer than SP's.
+            if (createdStale) patch.user_created_time = item.created;
             if (Object.keys(patch).length) {
               await apiRequest('PUT', '/notes/' + existing.id, patch);
               projectResult.updated += 1;
@@ -656,6 +709,7 @@ for (const project of projects) {
             const patch = {};
             if (titleStale) patch.title = item.title;
             if (todoStale) Object.assign(patch, desiredTodo);
+            if (createdStale || Object.keys(patch).length) Object.assign(patch, noteDates(item));
             if (Object.keys(patch).length) {
               await apiRequest('PUT', '/notes/' + existing.id, patch);
               projectResult.updated += 1;
@@ -668,6 +722,14 @@ for (const project of projects) {
               projectResult.taskNotesSynced[item.id] = decision.syncedContent;
             }
           }
+        }
+
+        // By now Joplin's checkbox matches desiredTodo (pushed, or already
+        // equal), so that's the new baseline — unless it's waiting on a pull.
+        if (donePull !== null) {
+          projectResult.taskDonePulled.push({ taskId: item.id, isDone: donePull });
+        } else if (desiredTodo && !doneDeferred && decision.action !== 'delete') {
+          projectResult.taskDoneSynced[item.id] = desiredTodo.todo_completed > 0;
         }
       }
 
@@ -728,7 +790,19 @@ for (const project of projects) {
 }
 
 return { success: true, results };
-`;
+`);
+
+// The script text rides in the same Windows command-line argument as the
+// payload (see MAX_PROJECT_PAYLOAD_CHARS), and about half of it is comments.
+// Drops whole-line // comments, indentation and blank lines; safe because the
+// script has no multi-line string literals.
+function compactNodeScript(source) {
+  return source
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('//'))
+    .join('\n');
+}
 
 let intervalHandle = null;
 let debounceTimer = null;
@@ -819,7 +893,30 @@ function buildTaskDecoration(task, config, tasksById) {
     );
   }
 
+  if (config.syncTaskAttachments) {
+    const lines = (task.attachments || []).map(attachmentMarkdown).filter((l) => !!l);
+    if (lines.length > 0) blocks.push(['**Attachments**', ...lines].join('\n'));
+  }
+
   return blocks.join('\n\n');
+}
+
+// One markdown list line per Super Productivity task attachment, or '' for
+// types with nothing to link to (COMMAND, NOTE). Links and images are linked
+// (web images shown inline); local files become file:// links, which Joplin
+// opens with the system's default app. Files aren't copied into Joplin.
+function attachmentMarkdown(a) {
+  const path = String((a && a.path) || '').trim();
+  if (!path || !a || !['LINK', 'IMG', 'FILE'].includes(a.type)) return '';
+  const title = String(a.title || path).replace(/[[\]]/g, '');
+  let url = path;
+  if (a.type === 'FILE' && !/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) {
+    url = 'file://' + (path.startsWith('/') ? '' : '/') + path.replace(/\\/g, '/');
+  } else if (a.type !== 'FILE' && !/^[a-z][a-z0-9+.-]*:/i.test(path)) {
+    url = 'https://' + path;
+  }
+  const isWebImage = a.type === 'IMG' && /^https?:/i.test(url);
+  return `- ${isWebImage ? '!' : ''}[${title}](<${url}>)`;
 }
 
 // Renders a duration in ms as e.g. "2h 15m", "45m", or "0m" — good enough for
@@ -941,7 +1038,7 @@ function buildProjectFolderIcon(iconName, color, title) {
 // rather than hardcoding a number: that way growing the script (which is what
 // caused a "spawn ENAMETOOLONG" when the project-icon code was first added to
 // it inline) automatically tightens the payload budget instead of silently
-// blowing the limit. ~5.6K with the current script, floored at 3K.
+// blowing the limit. ~12K with the current (compacted) script, floored at 3K.
 const MAX_PROJECT_PAYLOAD_CHARS = Math.max(3000, 27000 - NODE_SYNC_SCRIPT.length);
 
 // Greedily packs items into chunks whose combined JSON size stays under
@@ -978,11 +1075,18 @@ async function loadTaskSyncState() {
   try {
     const raw = await PluginAPI.loadSyncedData(TASK_SYNC_STATE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    return parsed && typeof parsed.tasks === 'object' && parsed.tasks
-      ? parsed
-      : { tasks: {} };
+    if (!parsed || typeof parsed.tasks !== 'object' || !parsed.tasks) {
+      return { tasks: {}, done: {} };
+    }
+    // `done` (the per-task done-state baseline) was added after `tasks`, so
+    // older saved state, or one saved by an older version on another device,
+    // lacks it — which just means "no baseline yet".
+    return {
+      tasks: parsed.tasks,
+      done: typeof parsed.done === 'object' && parsed.done ? parsed.done : {},
+    };
   } catch (e) {
-    return { tasks: {} };
+    return { tasks: {}, done: {} };
   }
 }
 
@@ -1006,6 +1110,7 @@ async function loadEffectiveConfig() {
     syncTaskDueDates: cfg.syncTaskDueDates === true,
     syncTaskSubtasks: cfg.syncTaskSubtasks === true,
     syncTaskTimeStats: cfg.syncTaskTimeStats === true,
+    syncTaskAttachments: cfg.syncTaskAttachments === true,
     syncProjectIndex: cfg.syncProjectIndex === true,
   };
 }
@@ -1082,7 +1187,7 @@ async function performSync(trigger) {
 
   const taskSyncState = config.syncTaskNotes
     ? await loadTaskSyncState()
-    : { tasks: {} };
+    : { tasks: {}, done: {} };
 
   // Recurring calendar-imported tasks mint a new task id per occurrence
   // (see normalizeTaskId), so several ids can share the same sync id at
@@ -1109,7 +1214,13 @@ async function performSync(trigger) {
         .filter(
           (n) => !!n && typeof n.content === 'string' && n.content.trim().length > 0,
         )
-        .map((n) => ({ id: n.id, title: deriveTitle(n.content), body: buildBody(n) }));
+        .map((n) => ({
+          id: n.id,
+          title: deriveTitle(n.content),
+          body: buildBody(n),
+          created: n.created,
+          spUpdated: n.modified,
+        }));
 
       const taskNotes = config.syncTaskNotes
         ? Array.from(latestTaskBySyncId.values())
@@ -1143,8 +1254,14 @@ async function performSync(trigger) {
                 id: syncId,
                 title,
                 body: buildTaskBody(t, syncId, buildTaskDecoration(t, config, tasksById)),
+                created: t.created,
                 spUpdated: t.updated || t.created || 0,
                 lastSynced,
+                lastSyncedDone: config.syncTaskDueDates
+                  ? taskSyncState.done[syncId] === undefined
+                    ? null
+                    : taskSyncState.done[syncId]
+                  : undefined,
                 tagTitles: syncTaskTags
                   ? (t.tagIds || [])
                       .map((tagId) => tagsById[tagId] && tagsById[tagId].title)
@@ -1329,9 +1446,13 @@ async function performSync(trigger) {
   let pulled = 0;
   const pullErrors = [];
   if (config.syncTaskNotes) {
-    const newState = { tasks: { ...taskSyncState.tasks } };
+    const newState = {
+      tasks: { ...taskSyncState.tasks },
+      done: { ...taskSyncState.done },
+    };
     for (const r of results) {
       Object.assign(newState.tasks, r.taskNotesSynced || {});
+      Object.assign(newState.done, r.taskDoneSynced || {});
     }
     for (const r of results) {
       for (const pull of r.taskNotesPulled || []) {
@@ -1347,11 +1468,26 @@ async function performSync(trigger) {
           );
         }
       }
+      for (const pull of r.taskDonePulled || []) {
+        const targetTask = latestTaskBySyncId.get(pull.taskId);
+        if (!targetTask) continue;
+        try {
+          await PluginAPI.updateTask(targetTask.id, { isDone: pull.isDone });
+          newState.done[pull.taskId] = pull.isDone;
+          pulled += 1;
+        } catch (e) {
+          pullErrors.push(
+            r.projectTitle + ': failed to pull a task\'s done state (' + (e.message || e) + ')',
+          );
+        }
+      }
     }
     // Drop entries for sync ids that no longer map to any known task, so the
     // synced blob doesn't grow without bound.
-    for (const syncId of Object.keys(newState.tasks)) {
-      if (!latestTaskBySyncId.has(syncId)) delete newState.tasks[syncId];
+    for (const map of [newState.tasks, newState.done]) {
+      for (const syncId of Object.keys(map)) {
+        if (!latestTaskBySyncId.has(syncId)) delete map[syncId];
+      }
     }
     await saveTaskSyncState(newState);
   }

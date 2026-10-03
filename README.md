@@ -46,9 +46,11 @@ your own notes in them.
 | Task notes (default) | two-way | most recently edited side wins, no merge |
 | Task notes with **One-way task notes** on | Super Productivity → Joplin only | Super Productivity always wins |
 | Task tags (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
-| Task due dates and done state (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
+| Task due dates (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
+| Task done state (needs task-note sync) | two-way, or one-way with **One-way task notes** on | Super Productivity wins unless only the Joplin checkbox changed |
 | Task subtask checklist (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 | Task time estimate/spent (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
+| Task attachments (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 | Project task index note (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 
 Completed tasks get a `[Done] ` prefix on their Joplin note title — unless
@@ -77,8 +79,14 @@ field are set from the task, instead of just the `[Done] ` title prefix. A
 task's due date+time or due day is written to Joplin's `todo_due`, and its
 done state to `todo_completed`/the checkbox (using the task's own "marked done
 at" timestamp, falling back to its last-updated time for older tasks that
-predate that field). This is one-way (Super Productivity → Joplin). Due
-date/done edits made directly on the Joplin to-do are never read back.
+predate that field).
+
+The due date is one-way (Super Productivity → Joplin). The done state is
+two-way, like task notes: ticking or unticking the to-do in Joplin marks the
+task done or not done in Super Productivity on the next sync. A tick is only
+pulled when the task hasn't changed in Super Productivity since the last sync;
+otherwise Super Productivity's state wins. With **One-way task notes** on, the
+done state is one-way too and Joplin ticks get reverted.
 
 ## Subtasks and time stats
 
@@ -95,12 +103,27 @@ hidden `sp-task-id` marker, kept separate from the notes text itself so they
 never get mistaken for a Joplin-side edit to the notes (see syncTaskNotes's
 two-way diff, above).
 
+## Attachments
+
+With **Sync task attachments as links** on (needs task-note sync), each task's
+Joplin note gets a list of the task's attachments appended to the bottom: links,
+images (web images shown inline) and local files as `file://` links. The files
+themselves aren't copied into Joplin, so a file link only opens on a computer
+that has the file at that path. One-way, in the same block as subtasks and time
+stats.
+
 ## Project task index note
 
 With **Sync a project task index note** on (needs task-note sync), each
 project's Joplin sub-notebook gets an "Overview" note listing a link to every
 one of its task notes — handy once a project has more than a couple. One-way
 (Super Productivity → Joplin), regenerated in full on every sync.
+
+## Note dates
+
+Each synced note's created and updated dates in Joplin are set from the Super
+Productivity note or task, so sorting by date in Joplin reflects when you
+actually wrote it rather than when the plugin first synced it.
 
 ## Matching
 

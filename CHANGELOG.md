@@ -8,6 +8,24 @@ The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Every user-visible change bumps `version` in `manifest.json` and
 `package.json`, plus `PLUGIN_VERSION` in `plugin.js`.
 
+## [1.12.0] - 2026-10-03
+
+### Added
+- **Done state syncs back from Joplin.** With "Sync task due dates and done
+  state" on, ticking or unticking a task's Joplin to-do now marks the task
+  done or not done in Super Productivity. Pulled only when the task itself
+  hasn't changed since the last sync; one-way when "One-way task notes" is on.
+- **Note dates.** Joplin's created/updated dates on synced notes now come from
+  the Super Productivity note or task instead of the sync time. Existing notes
+  get their created date corrected on the next sync.
+- **Sync task attachments as links** setting (`syncTaskAttachments`, off by
+  default, needs "Sync task notes"). Lists a task's links, images and files at
+  the bottom of its Joplin note. Files are linked, not copied.
+
+### Changed
+- The Node sync script is sent without its comments, roughly halving its size
+  and leaving more room for note content per call on Windows.
+
 ## [1.11.0] - 2026-10-03
 
 ### Added
@@ -213,6 +231,7 @@ Every user-visible change bumps `version` in `manifest.json` and
 - One-way sync of Super Productivity project notes into Joplin notebooks via
   Joplin's local Web Clipper API. Desktop only.
 
+[1.12.0]: https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases/tag/v1.12.0
 [1.11.0]: https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases/tag/v1.11.0
 [1.10.0]: https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases/tag/v1.10.0
 [1.9.0]: https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases/tag/v1.9.0
