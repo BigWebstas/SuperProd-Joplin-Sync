@@ -59,7 +59,20 @@
     </style>
   </head>
   <body>
-    <h1>Joplin Notes Sync</h1>
+    <h1>Joplin Notes Sync <span id="version" class="text-muted"></span></h1>
+    <div
+      id="updateBanner"
+      class="card"
+      hidden
+    >
+      <strong>Update available:</strong> <span id="updateVersion"></span> —
+      <a
+        id="updateLink"
+        target="_blank"
+        rel="noopener"
+        >download it from GitHub</a
+      >, then reinstall it under Settings → Plugins.
+    </div>
     <p class="text-muted">
       Pushes each Super Productivity project's notes into a matching notebook in your
       local Joplin app. Project notes are one-way (Super Productivity → Joplin) — the
@@ -186,6 +199,13 @@
       async function refreshState() {
         try {
           const state = await sendMessage({ type: 'getState' });
+          document.getElementById('version').textContent = 'v' + state.version;
+          if (state.availableUpdate) {
+            document.getElementById('updateVersion').textContent =
+              'v' + state.availableUpdate.version;
+            document.getElementById('updateLink').href = state.availableUpdate.url;
+            document.getElementById('updateBanner').hidden = false;
+          }
           const badge = document.getElementById('tokenBadge');
           if (state.hasToken) {
             badge.textContent = 'set';

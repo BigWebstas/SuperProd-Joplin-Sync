@@ -53,6 +53,12 @@
 // plugin code afterwards, since executeNodeScript's child process has no
 // access to PluginAPI.
 
+// Keep in step with manifest.json/package.json: the plugin can't read its own
+// manifest, so this is what the update check compares against.
+const PLUGIN_VERSION = '1.11.0';
+const RELEASES_API_URL =
+  'https://api.github.com/repos/BigWebstas/SuperProd-Joplin-Sync/releases/latest';
+
 const TOKEN_SECRET_KEY = 'joplinApiToken';
 const TASK_SYNC_STATE_KEY = 'taskNotesSyncState';
 const AUTO_SYNC_DEBOUNCE_MS = 8000;
@@ -729,6 +735,8 @@ let debounceTimer = null;
 let isSyncing = false;
 let pendingRerun = false;
 let lastSyncInfo = null;
+// Set once per app session by checkForUpdate; null until it finds a newer release.
+let availableUpdate = null;
 
 // Heuristic detector for "Super Productivity just ran its own cross-device
 // sync": an incoming remote change tends to touch many tasks in a tight
@@ -1403,6 +1411,66 @@ async function performSync(trigger) {
   return lastSyncInfo;
 }
 
+// Separate from NODE_SYNC_SCRIPT on purpose: it runs once per session and must
+// not add to that script's command-line size budget. Goes through Node because
+// PluginAPI.request needs an extra "http" permission and allowedHosts entry,
+// while nodeExecution is already granted for the sync itself.
+// The require() also matters: the host runs require-free scripts in a bare VM
+// sandbox with no network access, and only spawns a real Node process otherwise.
+const NODE_LATEST_RELEASE_SCRIPT = `
+const https = require('https');
+const body = await new Promise((resolve, reject) => {
+  const req = https.get(
+    args[0],
+    { headers: { 'User-Agent': 'joplin-notes-sync', Accept: 'application/vnd.github+json' } },
+    (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () =>
+        res.statusCode === 200 ? resolve(data) : reject(new Error('GitHub returned ' + res.statusCode)),
+      );
+    },
+  );
+  req.on('error', reject);
+  req.setTimeout(8000, () => req.destroy(new Error('timed out')));
+});
+const release = JSON.parse(body);
+return { tag: release.tag_name, url: release.html_url };
+`;
+
+function isNewerVersion(latest, current) {
+  const a = String(latest).replace(/^v/, '').split('.').map(Number);
+  const b = String(current).replace(/^v/, '').split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    if (x !== y) return x > y;
+  }
+  return false;
+}
+
+// Best effort: offline, rate-limited, or no node consent all just mean no
+// update notice this session.
+async function checkForUpdate() {
+  if (!PluginAPI.executeNodeScript) return;
+  try {
+    const outcome = await PluginAPI.executeNodeScript({
+      script: NODE_LATEST_RELEASE_SCRIPT,
+      args: [RELEASES_API_URL],
+      timeout: 10000,
+    });
+    const release = outcome && outcome.success ? outcome.result : null;
+    if (!release || !release.tag || !isNewerVersion(release.tag, PLUGIN_VERSION)) return;
+    availableUpdate = { version: release.tag.replace(/^v/, ''), url: release.url };
+    PluginAPI.showSnack({
+      msg: `Joplin Notes Sync ${availableUpdate.version} is available (you have ${PLUGIN_VERSION}).`,
+      type: 'INFO',
+    });
+  } catch (e) {
+    console.warn('Joplin Notes Sync: update check failed', e);
+  }
+}
+
 async function runSync(trigger) {
   if (isSyncing) {
     pendingRerun = true;
@@ -1440,7 +1508,14 @@ if (PluginAPI.onMessage) {
       case 'getState': {
         const config = await loadEffectiveConfig();
         const hasToken = !!(await PluginAPI.getSecret(TOKEN_SECRET_KEY));
-        return { success: true, config, hasToken, lastSyncInfo };
+        return {
+          success: true,
+          config,
+          hasToken,
+          lastSyncInfo,
+          version: PLUGIN_VERSION,
+          availableUpdate,
+        };
       }
       case 'saveToken': {
         const value = String((message && message.token) || '').trim();
@@ -1467,6 +1542,7 @@ if (PluginAPI.onMessage) {
 
 PluginAPI.onReady?.(async () => {
   await reloadIntervalFromConfig();
+  checkForUpdate();
 });
 
 PluginAPI.onUnload?.(() => {

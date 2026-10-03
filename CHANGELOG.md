@@ -5,8 +5,17 @@ All notable changes to **Joplin Notes Sync**. Each version links to its
 which carries the full write-up and the installable zip.
 
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
-Every user-visible change bumps `version` in both `manifest.json` and
-`package.json`.
+Every user-visible change bumps `version` in `manifest.json` and
+`package.json`, plus `PLUGIN_VERSION` in `plugin.js`.
+
+## [1.11.0] - 2026-10-03
+
+### Added
+- **Update checker.** Once per app launch the plugin asks GitHub for the
+  latest release. If it's newer than the installed version, a snack says so
+  and the plugin page shows a banner linking to the release. The page header
+  now also shows the installed version. Failures (offline, rate limit, no
+  Node permission) are silent.
 
 ## [1.10.0] - 2026-09-28
 
@@ -204,6 +213,9 @@ Every user-visible change bumps `version` in both `manifest.json` and
 - One-way sync of Super Productivity project notes into Joplin notebooks via
   Joplin's local Web Clipper API. Desktop only.
 
+[1.11.0]: https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases/tag/v1.11.0
+[1.10.0]: https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases/tag/v1.10.0
+[1.9.0]: https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases/tag/v1.9.0
 [1.8.1]: https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases/tag/v1.8.1
 [1.8.0]: https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases/tag/v1.8.0
 [1.7.0]: https://github.com/BigWebstas/SuperProd-Joplin-Sync/releases/tag/v1.7.0
