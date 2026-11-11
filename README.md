@@ -137,7 +137,7 @@ With **Write daily summary notes** on (doesn't need task-note sync), one note pe
 day (`YYYY-MM-DD`) is written to a `Daily summaries` notebook under the parent
 notebook. It lists the tasks completed that day and the time tracked per task,
 using Super Productivity's start-of-next-day setting, and includes archived
-tasks. The last 7 days are refreshed on every sync; older notes are left alone.
+tasks. The notebook gets a 📅 icon when **Icons and colours** is on. The last 7 days are refreshed on every sync; older notes are left alone.
 With **Add charts to daily summaries** on (the default), each note starts with
 Mermaid pie charts: time by project, time by task, and completed tasks by project
 (a chart with fewer than two slices is left out). Joplin renders these in its

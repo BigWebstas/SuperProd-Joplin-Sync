@@ -23,6 +23,8 @@ Every user-visible change bumps `version` in `manifest.json` and
   are unchanged, so existing configuration carries over.
 
 ### Added
+- **Icon on the “Daily summaries” notebook** (a 📅 on a blue tile), drawn like
+  the project icons and controlled by the same “Icons and colours” setting.
 - **Charts in daily summaries** (`dailySummaryCharts`, on by default, needs
   "Write daily summary notes"). Mermaid pie charts at the top of each day's
   note: time by project, time by task, and completed tasks by project. A chart

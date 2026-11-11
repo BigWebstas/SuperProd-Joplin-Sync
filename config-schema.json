@@ -93,7 +93,7 @@
     "syncProjectIcons": {
       "type": "boolean",
       "title": "Projects: Icons and colours",
-      "description": "Give each project notebook an icon on a tile in the project colour. One-way.",
+      "description": "Give each project notebook (and the “Daily summaries” notebook) an icon on a coloured tile. One-way.",
       "default": false
     },
     "syncProjectIndex": {

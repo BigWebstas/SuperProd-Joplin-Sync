@@ -1686,6 +1686,9 @@ async function performSync(trigger) {
 // untouched. Notes are matched by an sp-daily marker, like task notes.
 const DAILY_SUMMARY_DAYS = 7;
 const DAILY_FOLDER_TITLE = 'Daily summaries';
+// Folder icon, drawn like the project icons (and only with "Sync project icons").
+const DAILY_FOLDER_ICON = 'calendar_month';
+const DAILY_FOLDER_COLOR = '#3f7fd0';
 const DAILY_MARKER_PREFIX = '<!-- sp-daily:';
 const DAILY_MAX_LINES = 100;
 const DAILY_MAX_PAYLOAD_CHARS = 18000;
@@ -1749,6 +1752,12 @@ async function findOrCreateFolder(title, parentId) {
 }
 const rootId = await findOrCreateFolder(input.parentTitle, '');
 const folderId = await findOrCreateFolder(input.folderTitle, rootId);
+if (input.icon) {
+  try {
+    const current = await api('GET', '/folders/' + folderId + '?fields=id,icon');
+    if (!current || current.icon !== input.icon) await api('PUT', '/folders/' + folderId, { icon: input.icon });
+  } catch (e) {}
+}
 const existing = await listAll('/folders/' + folderId + '/notes', 'id,title,body');
 let created = 0;
 let updated = 0;
@@ -1885,6 +1894,9 @@ async function syncDailySummaries(config, token, tasks, projectsById) {
           parentTitle: config.parentNotebookTitle,
           folderTitle: DAILY_FOLDER_TITLE,
           markerPrefix: DAILY_MARKER_PREFIX,
+          icon: config.syncProjectIcons
+            ? buildProjectFolderIcon(DAILY_FOLDER_ICON, DAILY_FOLDER_COLOR, DAILY_FOLDER_TITLE)
+            : '',
           days,
         },
       ],
