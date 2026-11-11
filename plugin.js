@@ -60,7 +60,7 @@
 
 // Keep in step with manifest.json/package.json: the plugin can't read its own
 // manifest, so this is what the update check compares against.
-const PLUGIN_VERSION = '1.13.0';
+const PLUGIN_VERSION = '1.13.1';
 const RELEASES_API_URL =
   'https://api.github.com/repos/BigWebstas/SuperProd-Joplin-Sync/releases/latest';
 
@@ -809,6 +809,8 @@ function compactNodeScript(source) {
 let intervalHandle = null;
 let debounceTimer = null;
 let isSyncing = false;
+// Live progress of the running sync, polled by the plugin page via getState.
+let syncProgress = { active: false, percent: 0, label: '' };
 let pendingRerun = false;
 let lastSyncInfo = null;
 // Set once per app session by checkForUpdate; null until it finds a newer release.
@@ -1413,7 +1415,7 @@ async function performSync(trigger) {
   // NODE_SYNC_SCRIPT) — the rest only create/update.
   const results = [];
   let hardFailure = null;
-  outer: for (const project of payloadProjects) {
+  outer: for (const [projectIdx, project] of payloadProjects.entries()) {
     // Build the list of executeNodeScript calls for this project. Notes and
     // task notes go in SEPARATE calls, never combined — that's what bounds a
     // single call's args at NODE_SYNC_SCRIPT + one chunk (MAX_PROJECT_PAYLOAD_
@@ -1472,7 +1474,16 @@ async function performSync(trigger) {
     // this run when building the project index (see syncProjectIndex).
     projectCalls[projectCalls.length - 1].isProjectFinalCall = true;
 
-    for (const projectChunk of projectCalls) {
+    for (const [callIdx, projectChunk] of projectCalls.entries()) {
+      syncProgress = {
+        active: true,
+        percent: Math.min(
+          99,
+          Math.round(((projectIdx + callIdx / projectCalls.length) / payloadProjects.length) * 100),
+        ),
+        label: `${project.title} (project ${projectIdx + 1} of ${payloadProjects.length})`,
+        startedAt: syncProgress.startedAt,
+      };
       let outcome;
       try {
         outcome = await PluginAPI.executeNodeScript({
@@ -1891,10 +1902,22 @@ async function runSync(trigger) {
     return lastSyncInfo;
   }
   isSyncing = true;
+  syncProgress = { active: true, percent: 0, label: 'Starting…', startedAt: Date.now() };
   try {
     return await performSync(trigger);
+  } catch (e) {
+    // Keep the cause visible on the plugin page instead of a blank "not synced".
+    console.warn('Joplin Notes Sync: sync failed', e);
+    lastSyncInfo = {
+      at: Date.now(),
+      trigger,
+      success: false,
+      error: (e && e.message) || String(e),
+    };
+    return lastSyncInfo;
   } finally {
     isSyncing = false;
+    syncProgress = { active: false, percent: 0, label: '' };
     if (pendingRerun) {
       pendingRerun = false;
       scheduleSync(1000);
@@ -1927,6 +1950,7 @@ if (PluginAPI.onMessage) {
           config,
           hasToken,
           lastSyncInfo,
+          syncProgress,
           version: PLUGIN_VERSION,
           availableUpdate,
         };
@@ -1945,8 +1969,12 @@ if (PluginAPI.onMessage) {
         return { success: true };
       }
       case 'syncNow': {
-        const info = await runSync('manual');
-        return { success: true, info };
+        // Don't wait for the sync: a first sync of a big library can take
+        // minutes, longer than the page is willing to wait for a reply. The page
+        // polls getState for syncProgress and lastSyncInfo instead.
+        const alreadyRunning = isSyncing;
+        runSync('manual');
+        return { success: true, started: !alreadyRunning, alreadyRunning };
       }
       default:
         return { success: false, error: 'Unknown message type' };

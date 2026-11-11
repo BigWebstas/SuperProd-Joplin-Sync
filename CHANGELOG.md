@@ -8,6 +8,21 @@ The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Every user-visible change bumps `version` in `manifest.json` and
 `package.json`, plus `PLUGIN_VERSION` in `plugin.js`.
 
+## [1.13.1] - 2026-11-11
+
+### Added
+- **Sync progress.** The plugin page shows a progress bar with a percentage, the
+  current project and elapsed time while a sync runs, and picks up an
+  auto-sync already in progress.
+
+### Fixed
+- A long sync (for example the first one on a big library) no longer makes the
+  page show "Message timeout" and then "Not synced yet" while it is still
+  working. **Sync now** returns immediately and the page follows the sync's
+  progress.
+- An unexpected error during a sync is now stored and shown as "Failed: …"
+  instead of leaving the page on "Not synced yet".
+
 ## [1.13.0] - 2026-11-11
 
 ### Added

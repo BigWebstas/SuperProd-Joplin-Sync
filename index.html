@@ -140,6 +140,21 @@
         </button>
       </div>
       <div
+        id="progressWrap"
+        hidden
+      >
+        <progress
+          id="progressBar"
+          max="100"
+          value="0"
+          style="width: 100%"
+        ></progress>
+        <div
+          id="progressLabel"
+          class="status text-muted"
+        ></div>
+      </div>
+      <div
         id="status"
         class="status"
       ></div>
@@ -196,6 +211,27 @@
         return `[${when}] (${info.trigger})\n` + lines.join('\n');
       }
 
+      function renderProgress(progress) {
+        const active = !!(progress && progress.active);
+        document.getElementById('progressWrap').hidden = !active;
+        if (!active) return;
+        const secs = progress.startedAt
+          ? Math.round((Date.now() - progress.startedAt) / 1000)
+          : 0;
+        document.getElementById('progressBar').value = progress.percent || 0;
+        document.getElementById('progressLabel').textContent =
+          `${progress.percent || 0}% — ${progress.label || ''}` + (secs ? ` · ${secs}s` : '');
+      }
+
+      let pollTimer = null;
+      function schedulePoll() {
+        if (pollTimer) return;
+        pollTimer = setTimeout(() => {
+          pollTimer = null;
+          refreshState();
+        }, 1000);
+      }
+
       async function refreshState() {
         try {
           const state = await sendMessage({ type: 'getState' });
@@ -236,9 +272,18 @@
             `Sync project icons/colours: ${
               state.config.syncProjectIcons ? 'on' : 'off'
             }`;
-          document.getElementById('status').textContent = formatSyncInfo(
-            state.lastSyncInfo,
+          renderProgress(state.syncProgress);
+          document.getElementById('syncNowBtn').disabled = !!(
+            state.syncProgress && state.syncProgress.active
           );
+          if (state.syncProgress && state.syncProgress.active) {
+            document.getElementById('status').textContent = 'Syncing…';
+            schedulePoll();
+          } else {
+            document.getElementById('status').textContent = formatSyncInfo(
+              state.lastSyncInfo,
+            );
+          }
         } catch (e) {
           document.getElementById('status').textContent =
             'Error loading state: ' + e.message;
@@ -267,10 +312,10 @@
           await sendMessage({ type: 'syncNow' });
         } catch (e) {
           document.getElementById('status').textContent = 'Error: ' + e.message;
-        } finally {
           btn.disabled = false;
-          refreshState();
+          return;
         }
+        refreshState();
       });
 
       refreshState();
