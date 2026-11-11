@@ -120,6 +120,26 @@ function normalizeTaskId(id) {
   return String(id).replace(CALENDAR_OCCURRENCE_SUFFIX_RE, '');
 }
 
+// Short fingerprint of a task note's content (cyrb53 plus the length). The
+// two-way diff only needs to know whether a note changed since the last sync,
+// so the saved baseline is this, not the whole text: Super Productivity caps
+// a plugin's synced data at 256KB and full note text blew through it. The same
+// function runs inside NODE_SYNC_SCRIPT (inlined below via toString()), so both
+// sides always agree.
+function hashText(text) {
+  const str = String(text);
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return 'h:' + (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36) + ':' + str.length;
+}
+
 // Executed inside a plain Node.js process via PluginAPI.executeNodeScript.
 // Kept dependency-free (only Node built-ins) since the sandbox only allows
 // fs/path/os via `require` for trivial scripts — anything else (like this)
@@ -130,6 +150,7 @@ const NODE_SYNC_SCRIPT = compactNodeScript(`
 const http = require('http');
 const https = require('https');
 
+${hashText.toString()}
 const input = args[0] || {};
 const baseUrl = String(input.baseUrl || '').replace(/\\/+$/, '');
 const token = String(input.token || '');
@@ -455,8 +476,8 @@ function decideTaskAction(item, existingNote, ctx) {
   }
 
   const lastSynced = item.lastSynced;
-  const spChanged = lastSynced === null || spContent !== lastSynced;
-  const joplinChanged = lastSynced === null || joplinContent !== lastSynced;
+  const spChanged = lastSynced === null || hashText(spContent) !== lastSynced;
+  const joplinChanged = lastSynced === null || hashText(joplinContent) !== lastSynced;
 
   const canPull = canPullTask(item);
 
@@ -662,7 +683,7 @@ for (const project of projects) {
               ...noteDates(item),
             });
             projectResult.created += 1;
-            projectResult.taskNotesSynced[item.id] = spContent;
+            projectResult.taskNotesSynced[item.id] = hashText(spContent);
             if (syncTaskTags) await syncNoteTags(created.id, item.tagTitles || []);
             // byTaskId only reflects the folder listing taken at the top of
             // this call, so a note created just now needs adding by hand —
@@ -678,7 +699,7 @@ for (const project of projects) {
               ...noteDates(item),
             });
             projectResult.updated += 1;
-            projectResult.taskNotesSynced[item.id] = spContent;
+            projectResult.taskNotesSynced[item.id] = hashText(spContent);
             if (syncTaskTags) await syncNoteTags(existing.id, item.tagTitles || []);
             existing.title = item.title;
             existing.body = item.body;
@@ -688,7 +709,7 @@ for (const project of projects) {
             const archived = await removeOrArchive(existing.id, tasksFolderId);
             if (archived) projectResult.archived += 1;
             else projectResult.deleted += 1;
-            projectResult.taskNotesSynced[item.id] = '';
+            projectResult.taskNotesSynced[item.id] = hashText('');
             byTaskId.delete(item.id);
             break;
           }
@@ -721,7 +742,7 @@ for (const project of projects) {
             }
             if (syncTaskTags && existing) await syncNoteTags(existing.id, item.tagTitles || []);
             if (decision.syncedContent !== undefined) {
-              projectResult.taskNotesSynced[item.id] = decision.syncedContent;
+              projectResult.taskNotesSynced[item.id] = hashText(decision.syncedContent);
             }
           }
         }
@@ -1132,8 +1153,14 @@ async function loadTaskSyncState() {
     // `done` (the per-task done-state baseline) was added after `tasks`, so
     // older saved state, or one saved by an older version on another device,
     // lacks it — which just means "no baseline yet".
+    // Older versions saved the full note text as the baseline; fingerprint it
+    // so the state shrinks on the next save.
+    const tasks = {};
+    for (const [id, value] of Object.entries(parsed.tasks)) {
+      tasks[id] = typeof value === 'string' && !value.startsWith('h:') ? hashText(value) : value;
+    }
     return {
-      tasks: parsed.tasks,
+      tasks,
       done: typeof parsed.done === 'object' && parsed.done ? parsed.done : {},
     };
   } catch (e) {
@@ -1565,7 +1592,7 @@ async function performSync(trigger) {
         if (!targetTask) continue;
         try {
           await PluginAPI.updateTask(targetTask.id, { notes: pull.content });
-          newState.tasks[pull.taskId] = pull.content;
+          newState.tasks[pull.taskId] = hashText(pull.content);
           pulled += 1;
         } catch (e) {
           pullErrors.push(

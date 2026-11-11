@@ -10,6 +10,12 @@ Every user-visible change bumps `version` in `manifest.json` and
 
 ## [1.14.0] - 2026-11-11
 
+### Fixed
+- **"Plugin data exceeds maximum size of 256KB" sync failure.** The saved
+  two-way sync state held the full text of every task note. It now holds a
+  short fingerprint per note instead (about 8 KB for 300 two-KB notes), and
+  existing state is converted on the next sync.
+
 ### Changed
 - **Settings are grouped by category and the descriptions are shorter.** The
   settings list is ordered General, Tasks, Task note extras, Projects, Daily
