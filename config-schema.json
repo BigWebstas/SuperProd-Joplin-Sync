@@ -95,6 +95,18 @@
       "title": "Sync issue references",
       "description": "Only takes effect when \"Sync task notes\" is on. For tasks imported from an issue tracker, adds a line to the bottom of the Joplin note with the provider and issue id. It is a clickable link only when the issue id is itself a web URL; Super Productivity doesn't share its issue-provider settings with plugins, so URLs can't be built for GitHub, Jira and similar. Always one-way (Super Productivity → Joplin).",
       "default": false
+    },
+    "syncTaskRepeatInfo": {
+      "type": "boolean",
+      "title": "Sync repeat rule",
+      "description": "Only takes effect when \"Sync task notes\" is on. For tasks created by a repeating-task setup, adds a line to the bottom of the Joplin note describing the rule (for example \"Repeats every 2 weeks (Mon, Wed)\", with \"paused\" if the repeat is paused). Always one-way (Super Productivity → Joplin).",
+      "default": false
+    },
+    "syncDailySummary": {
+      "type": "boolean",
+      "title": "Write daily summary notes",
+      "description": "Writes one note per day (YYYY-MM-DD) into a \"Daily summaries\" notebook under the parent notebook, listing the tasks completed that day and the time tracked per task, using Super Productivity's start-of-next-day setting. The last 7 days are refreshed on every sync; older notes are left as they are. Does not need \"Sync task notes\". One-way, and the notes are regenerated, so edits to them in Joplin are overwritten.",
+      "default": false
     }
   },
   "required": []

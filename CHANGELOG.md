@@ -19,6 +19,13 @@ Every user-visible change bumps `version` in `manifest.json` and
   "Sync task notes"). Adds the issue provider and id to the bottom of the note
   for tasks imported from an issue tracker; clickable only when the id is a web
   URL, since Super Productivity doesn't expose issue-provider settings.
+- **Sync repeat rule** setting (`syncTaskRepeatInfo`, off by default, needs
+  "Sync task notes"). Adds a line such as "Repeats every 2 weeks (Mon, Wed)" to
+  notes of tasks created by a repeating-task setup.
+- **Write daily summary notes** setting (`syncDailySummary`, off by default).
+  One note per day in a "Daily summaries" notebook with the tasks completed and
+  time tracked that day; the last 7 days are refreshed each sync. Runs in its
+  own small Node script, so the main sync script's size budget is unchanged.
 
 ## [1.12.0] - 2026-10-03
 

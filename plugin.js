@@ -874,7 +874,7 @@ function buildTaskBody(task, syncId, decoration) {
 // Combines the subtask checklist and time-stats decorations (each opt-in) into
 // one markdown block, or '' if both are off/empty. tasksById resolves each
 // subtask id to its own task record (subtasks are just tasks with a parentId).
-function buildTaskDecoration(task, config, tasksById) {
+function buildTaskDecoration(task, config, tasksById, repeatCfgsById) {
   const blocks = [];
 
   if (config.syncTaskSubtasks) {
@@ -895,6 +895,11 @@ function buildTaskDecoration(task, config, tasksById) {
     );
   }
 
+  if (config.syncTaskRepeatInfo) {
+    const line = repeatInfoMarkdown(task, repeatCfgsById || {});
+    if (line) blocks.push(line);
+  }
+
   if (config.syncTaskIssueLinks) {
     const line = issueLinkMarkdown(task);
     if (line) blocks.push(line);
@@ -906,6 +911,28 @@ function buildTaskDecoration(task, config, tasksById) {
   }
 
   return blocks.join('\n\n');
+}
+
+// One line describing the repeat rule of a task created by a repeating-task
+// config, e.g. "🔁 Repeats every 2 weeks (Mon, Wed)". '' if the task isn't
+// repeating or its config is gone.
+const REPEAT_UNITS = { DAILY: 'day', WEEKLY: 'week', MONTHLY: 'month', YEARLY: 'year' };
+const REPEAT_WEEKDAYS = [
+  ['monday', 'Mon'], ['tuesday', 'Tue'], ['wednesday', 'Wed'], ['thursday', 'Thu'],
+  ['friday', 'Fri'], ['saturday', 'Sat'], ['sunday', 'Sun'],
+];
+function repeatInfoMarkdown(task, repeatCfgsById) {
+  const cfg = task.repeatCfgId ? repeatCfgsById[task.repeatCfgId] : null;
+  const unit = cfg && REPEAT_UNITS[cfg.repeatCycle];
+  if (!unit) return '';
+  const every = cfg.repeatEvery > 1 ? `${cfg.repeatEvery} ${unit}s` : unit;
+  let text = `🔁 Repeats every ${every}`;
+  if (cfg.repeatCycle === 'WEEKLY') {
+    const days = REPEAT_WEEKDAYS.filter(([key]) => cfg[key]).map(([, label]) => label);
+    if (days.length > 0 && days.length < 7) text += ` (${days.join(', ')})`;
+  }
+  if (cfg.isPaused) text += ' — paused';
+  return text;
 }
 
 // A one-line reference to the issue a task was imported from. Super
@@ -1136,6 +1163,8 @@ async function loadEffectiveConfig() {
     syncProjectIndex: cfg.syncProjectIndex === true,
     syncArchivedTasks: cfg.syncArchivedTasks === true,
     syncTaskIssueLinks: cfg.syncTaskIssueLinks === true,
+    syncTaskRepeatInfo: cfg.syncTaskRepeatInfo === true,
+    syncDailySummary: cfg.syncDailySummary === true,
   };
 }
 
@@ -1207,16 +1236,24 @@ async function performSync(trigger) {
   const tasksById = appState.tasks || {};
   const tagsById = appState.tags || {};
   const allTasks = Object.values(tasksById);
+  const repeatCfgsById = appState.taskRepeatCfgs || {};
 
   // Archived tasks live outside the live app state. With the option on they're
   // synced like live tasks (one-way) so their notes aren't swept up as orphans
   // when a task is archived. If they can't be read, abort rather than run the
   // orphan sweep without them — that would remove or archive their notes.
+  const needArchivedForNotes = config.syncTaskNotes && config.syncArchivedTasks;
   let archivedTasks = [];
-  if (config.syncTaskNotes && config.syncArchivedTasks) {
+  let archivedLoaded = false;
+  if (needArchivedForNotes || config.syncDailySummary) {
     try {
       archivedTasks = (await PluginAPI.getArchivedTasks()) || [];
+      archivedLoaded = true;
     } catch (e) {
+      // The daily summary alone just skips; the archived-notes option aborts.
+      if (!needArchivedForNotes) {
+        console.warn('Joplin Notes Sync: could not read archived tasks', e);
+      } else {
       lastSyncInfo = {
         at: Date.now(),
         trigger,
@@ -1224,11 +1261,12 @@ async function performSync(trigger) {
         error: 'Could not read archived tasks (' + (e && e.message ? e.message : e) + ')',
       };
       return lastSyncInfo;
+      }
     }
   }
   const archivedIds = new Set();
   const lookupById = Object.assign({}, tasksById);
-  for (const t of archivedTasks) {
+  for (const t of needArchivedForNotes ? archivedTasks : []) {
     if (!t || !t.id || tasksById[t.id]) continue;
     archivedIds.add(t.id);
     lookupById[t.id] = t;
@@ -1303,7 +1341,7 @@ async function performSync(trigger) {
               return {
                 id: syncId,
                 title,
-                body: buildTaskBody(t, syncId, buildTaskDecoration(t, config, lookupById)),
+                body: buildTaskBody(t, syncId, buildTaskDecoration(t, config, lookupById, repeatCfgsById)),
                 archived: archivedIds.has(t.id) ? true : undefined,
                 created: t.created,
                 spUpdated: t.updated || t.created || 0,
@@ -1342,6 +1380,10 @@ async function performSync(trigger) {
       return { id: p.id, title: p.title, icon, notes, taskNotes };
     })
     .filter((p) => p.notes.length > 0 || p.taskNotes.length > 0);
+
+  if (config.syncDailySummary && archivedLoaded) {
+    await syncDailySummaries(config, token, allTasks.concat(archivedTasks), appState.projects || {});
+  }
 
   if (payloadProjects.length === 0) {
     lastSyncInfo = { at: Date.now(), trigger, success: true, results: [] };
@@ -1596,6 +1638,191 @@ async function performSync(trigger) {
   }
 
   return lastSyncInfo;
+}
+
+// Daily summary notes: one Joplin note per day ("YYYY-MM-DD") in a "Daily
+// summaries" notebook under the parent notebook, listing what was completed and
+// where time went. Only the last DAILY_SUMMARY_DAYS days are rewritten; older
+// notes are left alone. Own small script so NODE_SYNC_SCRIPT's size budget is
+// untouched. Notes are matched by an sp-daily marker, like task notes.
+const DAILY_SUMMARY_DAYS = 7;
+const DAILY_FOLDER_TITLE = 'Daily summaries';
+const DAILY_MARKER_PREFIX = '<!-- sp-daily:';
+const DAILY_MAX_LINES = 100;
+const DAILY_MAX_PAYLOAD_CHARS = 18000;
+
+const NODE_DAILY_SCRIPT = compactNodeScript(`
+const http = require('http');
+const https = require('https');
+const input = args[0] || {};
+const baseUrl = String(input.baseUrl || '').replace(/\\/+$/, '');
+function api(method, path, body) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(baseUrl + path);
+    url.searchParams.set('token', String(input.token || ''));
+    const payload = body !== undefined ? JSON.stringify(body) : undefined;
+    const req = (url.protocol === 'https:' ? https : http).request(
+      url,
+      {
+        method,
+        headers: payload
+          ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
+          : {},
+        timeout: 10000,
+      },
+      (res) => {
+        let raw = '';
+        res.on('data', (c) => (raw += c));
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              resolve(raw ? JSON.parse(raw) : null);
+            } catch (e) {
+              resolve(null);
+            }
+          } else {
+            reject(new Error(method + ' ' + path + ' failed (' + res.statusCode + ')'));
+          }
+        });
+      },
+    );
+    req.on('timeout', () => req.destroy(new Error('timed out')));
+    req.on('error', (e) => reject(new Error('Joplin request error: ' + e.message)));
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+async function listAll(path, fields) {
+  const items = [];
+  for (let page = 1; page <= 20; page++) {
+    const sep = path.includes('?') ? '&' : '?';
+    const res = await api('GET', path + sep + 'fields=' + fields + '&limit=100&page=' + page);
+    items.push(...((res && res.items) || []));
+    if (!res || !res.has_more) break;
+  }
+  return items;
+}
+async function findOrCreateFolder(title, parentId) {
+  const all = await listAll('/folders', 'id,title,parent_id');
+  const hit = all.find((f) => f.title === title && (f.parent_id || '') === (parentId || ''));
+  if (hit) return hit.id;
+  return (await api('POST', '/folders', { title, parent_id: parentId || undefined })).id;
+}
+const rootId = await findOrCreateFolder(input.parentTitle, '');
+const folderId = await findOrCreateFolder(input.folderTitle, rootId);
+const existing = await listAll('/folders/' + folderId + '/notes', 'id,title,body');
+let created = 0;
+let updated = 0;
+for (const day of input.days) {
+  const hit = existing.find((n) => String(n.body || '').includes(input.markerPrefix + day.date + ' -->'));
+  if (!hit) {
+    await api('POST', '/notes', { title: day.date, body: day.body, parent_id: folderId });
+    created += 1;
+  } else if (hit.body !== day.body || hit.title !== day.date) {
+    await api('PUT', '/notes/' + hit.id, { title: day.date, body: day.body });
+    updated += 1;
+  }
+}
+return { created, updated };
+`);
+
+function localDateStr(ms) {
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// Builds one markdown body per day (newest first) from completions (doneOn)
+// and per-day time (timeSpentOnDay). A parent task's time is the sum of its
+// subtasks', so tasks with subtasks are left out of the time list.
+function buildDailySummaryDays(tasks, projectsById, todayStr, startOfNextDayDiffMs) {
+  const dayOf = (ms) => localDateStr(ms - startOfNextDayDiffMs);
+  const days = [];
+  const base = new Date(`${todayStr}T12:00:00`);
+  for (let i = 0; i < DAILY_SUMMARY_DAYS; i++) {
+    const d = new Date(base);
+    d.setDate(d.getDate() - i);
+    days.push(localDateStr(d.getTime()));
+  }
+  const wanted = new Set(days);
+  const done = new Map(days.map((d) => [d, []]));
+  const spent = new Map(days.map((d) => [d, []]));
+  const seen = new Set();
+  for (const t of tasks) {
+    if (!t || !t.id || seen.has(t.id)) continue;
+    seen.add(t.id);
+    const project = t.projectId && projectsById[t.projectId] ? projectsById[t.projectId].title : '';
+    const label = (t.title || 'Untitled task') + (project ? ` (${project})` : '');
+    if (t.isDone && t.doneOn) {
+      const day = dayOf(t.doneOn);
+      if (wanted.has(day)) done.get(day).push(label);
+    }
+    if (t.timeSpentOnDay && !(t.subTaskIds && t.subTaskIds.length > 0)) {
+      for (const day of days) {
+        const ms = t.timeSpentOnDay[day];
+        if (ms > 0) spent.get(day).push({ label, ms });
+      }
+    }
+  }
+  const out = [];
+  for (const date of days) {
+    const doneItems = done.get(date);
+    const spentItems = spent.get(date).sort((a, b) => b.ms - a.ms);
+    if (doneItems.length === 0 && spentItems.length === 0) continue;
+    const cap = (lines) =>
+      lines.length > DAILY_MAX_LINES
+        ? lines.slice(0, DAILY_MAX_LINES).concat(`…and ${lines.length - DAILY_MAX_LINES} more`)
+        : lines;
+    const blocks = [];
+    if (doneItems.length > 0) {
+      blocks.push([`**Completed (${doneItems.length})**`, ...cap(doneItems.map((l) => `- [x] ${l}`))].join('\n'));
+    }
+    if (spentItems.length > 0) {
+      const total = spentItems.reduce((sum, i) => sum + i.ms, 0);
+      blocks.push(
+        [`**Time tracked — ${formatDuration(total)}**`, ...cap(spentItems.map((i) => `- ${i.label} — ${formatDuration(i.ms)}`))].join('\n'),
+      );
+    }
+    out.push({ date, body: `${blocks.join('\n\n')}\n\n${DAILY_MARKER_PREFIX}${date}${MARKER_SUFFIX}` });
+  }
+  return out;
+}
+
+// Best-effort: a failure here is logged and never fails the main sync.
+async function syncDailySummaries(config, token, tasks, projectsById) {
+  try {
+    let todayStr = localDateStr(Date.now());
+    let diff = 0;
+    if (typeof PluginAPI.getDayContext === 'function') {
+      const ctx = await PluginAPI.getDayContext();
+      if (ctx && ctx.todayStr) {
+        todayStr = ctx.todayStr;
+        diff = ctx.startOfNextDayDiffMs || 0;
+      }
+    }
+    const days = buildDailySummaryDays(tasks, projectsById, todayStr, diff);
+    while (days.length > 1 && JSON.stringify(days).length > DAILY_MAX_PAYLOAD_CHARS) days.pop();
+    if (days.length === 0) return;
+    const outcome = await PluginAPI.executeNodeScript({
+      script: NODE_DAILY_SCRIPT,
+      args: [
+        {
+          baseUrl: config.joplinUrl,
+          token,
+          parentTitle: config.parentNotebookTitle,
+          folderTitle: DAILY_FOLDER_TITLE,
+          markerPrefix: DAILY_MARKER_PREFIX,
+          days,
+        },
+      ],
+      timeout: 25000,
+    });
+    if (!outcome || !outcome.success) {
+      console.warn('Joplin Notes Sync: daily summary failed', outcome && outcome.error);
+    }
+  } catch (e) {
+    console.warn('Joplin Notes Sync: daily summary failed', e);
+  }
 }
 
 // Separate from NODE_SYNC_SCRIPT on purpose: it runs once per session and must

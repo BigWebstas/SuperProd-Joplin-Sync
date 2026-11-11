@@ -52,6 +52,8 @@ your own notes in them.
 | Task time estimate/spent (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 | Task attachments (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 | Task issue reference (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
+| Task repeat rule (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
+| Daily summary notes | Super Productivity → Joplin only | Regenerated every sync |
 | Archived tasks (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 | Project task index note (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 
@@ -122,6 +124,22 @@ issue id (for example `🔗 Issue: GITHUB 123`). It is a clickable link only whe
 the id is itself a web URL: Super Productivity doesn't share its issue-provider
 settings (host, repository) with plugins, so URLs can't be built for GitHub,
 Jira and similar.
+
+## Repeat rule
+
+With **Sync repeat rule** on (needs task-note sync), a task created by a
+repeating-task setup gets a line at the bottom of its note, for example
+`🔁 Repeats every 2 weeks (Mon, Wed)`, with `— paused` if the repeat is paused.
+
+## Daily summary notes
+
+With **Write daily summary notes** on (doesn't need task-note sync), one note per
+day (`YYYY-MM-DD`) is written to a `Daily summaries` notebook under the parent
+notebook. It lists the tasks completed that day and the time tracked per task,
+using Super Productivity's start-of-next-day setting, and includes archived
+tasks. The last 7 days are refreshed on every sync; older notes are left alone.
+The notes are regenerated each time, so edits to them in Joplin are overwritten.
+It is best-effort: a failure is logged and never fails the main sync.
 
 ## Archived tasks
 
