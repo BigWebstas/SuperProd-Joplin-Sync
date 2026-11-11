@@ -138,7 +138,11 @@ day (`YYYY-MM-DD`) is written to a `Daily summaries` notebook under the parent
 notebook. It lists the tasks completed that day and the time tracked per task,
 using Super Productivity's start-of-next-day setting, and includes archived
 tasks. The last 7 days are refreshed on every sync; older notes are left alone.
-The notes are regenerated each time, so edits to them in Joplin are overwritten.
+With **Add charts to daily summaries** on (the default), each note starts with
+Mermaid pie charts: time by project, time by task, and completed tasks by project
+(a chart with fewer than two slices is left out). Joplin renders these in its
+viewer; other markdown apps show the code. The notes are regenerated each time,
+so edits to them in Joplin are overwritten.
 It is best-effort: a failure is logged and never fails the main sync.
 
 ## Archived tasks

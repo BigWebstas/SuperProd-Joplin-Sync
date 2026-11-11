@@ -107,6 +107,12 @@
       "title": "Write daily summary notes",
       "description": "Writes one note per day (YYYY-MM-DD) into a \"Daily summaries\" notebook under the parent notebook, listing the tasks completed that day and the time tracked per task, using Super Productivity's start-of-next-day setting. The last 7 days are refreshed on every sync; older notes are left as they are. Does not need \"Sync task notes\". One-way, and the notes are regenerated, so edits to them in Joplin are overwritten.",
       "default": false
+    },
+    "dailySummaryCharts": {
+      "type": "boolean",
+      "title": "Add charts to daily summaries",
+      "description": "Only takes effect when \"Write daily summary notes\" is on. Adds Mermaid pie charts at the top of each day's note: time by project, time by task and completed tasks by project (a chart is left out when it would have fewer than two slices). Joplin renders Mermaid diagrams in its viewer; other markdown apps show the code instead.",
+      "default": true
     }
   },
   "required": []

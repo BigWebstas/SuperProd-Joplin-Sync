@@ -8,9 +8,13 @@ The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Every user-visible change bumps `version` in `manifest.json` and
 `package.json`, plus `PLUGIN_VERSION` in `plugin.js`.
 
-## [1.13.1] - 2026-11-11
+## [1.14.0] - 2026-11-11
 
 ### Added
+- **Charts in daily summaries** (`dailySummaryCharts`, on by default, needs
+  "Write daily summary notes"). Mermaid pie charts at the top of each day's
+  note: time by project, time by task, and completed tasks by project. A chart
+  with fewer than two slices is left out. Rendered by Joplin's viewer.
 - **Sync progress.** The plugin page shows a progress bar with a percentage, the
   current project and elapsed time while a sync runs, and picks up an
   auto-sync already in progress.

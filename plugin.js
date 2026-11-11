@@ -60,7 +60,7 @@
 
 // Keep in step with manifest.json/package.json: the plugin can't read its own
 // manifest, so this is what the update check compares against.
-const PLUGIN_VERSION = '1.13.1';
+const PLUGIN_VERSION = '1.14.0';
 const RELEASES_API_URL =
   'https://api.github.com/repos/BigWebstas/SuperProd-Joplin-Sync/releases/latest';
 
@@ -1167,6 +1167,7 @@ async function loadEffectiveConfig() {
     syncTaskIssueLinks: cfg.syncTaskIssueLinks === true,
     syncTaskRepeatInfo: cfg.syncTaskRepeatInfo === true,
     syncDailySummary: cfg.syncDailySummary === true,
+    dailySummaryCharts: cfg.dailySummaryCharts !== false,
   };
 }
 
@@ -1746,7 +1747,32 @@ function localDateStr(ms) {
 // Builds one markdown body per day (newest first) from completions (doneOn)
 // and per-day time (timeSpentOnDay). A parent task's time is the sum of its
 // subtasks', so tasks with subtasks are left out of the time list.
-function buildDailySummaryDays(tasks, projectsById, todayStr, startOfNextDayDiffMs) {
+// A Mermaid pie chart (Joplin renders ```mermaid fences) from {label, value}
+// entries: biggest first, the tail beyond maxSlices folded into "Other". Labels
+// are stripped of characters that break the syntax. '' with fewer than two
+// slices, where a pie says nothing.
+const CHART_MAX_SLICES = 8;
+function mermaidPie(title, entries) {
+  const clean = (text) => String(text).replace(/["\r\n:]/g, ' ').replace(/\s+/g, ' ').trim() || '?';
+  const sorted = entries.filter((e) => e.value > 0).sort((a, b) => b.value - a.value);
+  const slices = sorted.slice(0, CHART_MAX_SLICES);
+  const rest = sorted.slice(CHART_MAX_SLICES).reduce((sum, e) => sum + e.value, 0);
+  if (rest > 0) slices.push({ label: 'Other', value: rest });
+  if (slices.length < 2) return '';
+  const lines = slices.map((e) => `    "${clean(e.label)}" : ${Math.round(e.value * 10) / 10}`);
+  return ['```mermaid', `pie showData title ${clean(title)}`, ...lines, '```'].join('\n');
+}
+
+function sumBy(items, keyOf, valueOf) {
+  const totals = new Map();
+  for (const item of items) {
+    const key = keyOf(item);
+    totals.set(key, (totals.get(key) || 0) + valueOf(item));
+  }
+  return Array.from(totals, ([label, value]) => ({ label, value }));
+}
+
+function buildDailySummaryDays(tasks, projectsById, todayStr, startOfNextDayDiffMs, withCharts) {
   const dayOf = (ms) => localDateStr(ms - startOfNextDayDiffMs);
   const days = [];
   const base = new Date(`${todayStr}T12:00:00`);
@@ -1766,12 +1792,12 @@ function buildDailySummaryDays(tasks, projectsById, todayStr, startOfNextDayDiff
     const label = (t.title || 'Untitled task') + (project ? ` (${project})` : '');
     if (t.isDone && t.doneOn) {
       const day = dayOf(t.doneOn);
-      if (wanted.has(day)) done.get(day).push(label);
+      if (wanted.has(day)) done.get(day).push({ label, project: project || 'No project' });
     }
     if (t.timeSpentOnDay && !(t.subTaskIds && t.subTaskIds.length > 0)) {
       for (const day of days) {
         const ms = t.timeSpentOnDay[day];
-        if (ms > 0) spent.get(day).push({ label, ms });
+        if (ms > 0) spent.get(day).push({ label, ms, project: project || 'No project', task: t.title || 'Untitled task' });
       }
     }
   }
@@ -1786,13 +1812,22 @@ function buildDailySummaryDays(tasks, projectsById, todayStr, startOfNextDayDiff
         : lines;
     const blocks = [];
     if (doneItems.length > 0) {
-      blocks.push([`**Completed (${doneItems.length})**`, ...cap(doneItems.map((l) => `- [x] ${l}`))].join('\n'));
+      blocks.push([`**Completed (${doneItems.length})**`, ...cap(doneItems.map((i) => `- [x] ${i.label}`))].join('\n'));
     }
     if (spentItems.length > 0) {
       const total = spentItems.reduce((sum, i) => sum + i.ms, 0);
       blocks.push(
         [`**Time tracked — ${formatDuration(total)}**`, ...cap(spentItems.map((i) => `- ${i.label} — ${formatDuration(i.ms)}`))].join('\n'),
       );
+    }
+    if (withCharts) {
+      const minutes = (i) => i.ms / 60000;
+      const charts = [
+        mermaidPie('Time by project (minutes)', sumBy(spentItems, (i) => i.project, minutes)),
+        mermaidPie('Time by task (minutes)', sumBy(spentItems, (i) => i.task, minutes)),
+        mermaidPie('Completed tasks by project', sumBy(doneItems, (i) => i.project, () => 1)),
+      ].filter((c) => !!c);
+      if (charts.length > 0) blocks.unshift(charts.join('\n\n'));
     }
     out.push({ date, body: `${blocks.join('\n\n')}\n\n${DAILY_MARKER_PREFIX}${date}${MARKER_SUFFIX}` });
   }
@@ -1811,7 +1846,7 @@ async function syncDailySummaries(config, token, tasks, projectsById) {
         diff = ctx.startOfNextDayDiffMs || 0;
       }
     }
-    const days = buildDailySummaryDays(tasks, projectsById, todayStr, diff);
+    const days = buildDailySummaryDays(tasks, projectsById, todayStr, diff, config.dailySummaryCharts);
     while (days.length > 1 && JSON.stringify(days).length > DAILY_MAX_PAYLOAD_CHARS) days.pop();
     if (days.length === 0) return;
     const outcome = await PluginAPI.executeNodeScript({
