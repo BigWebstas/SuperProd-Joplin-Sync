@@ -51,6 +51,8 @@ your own notes in them.
 | Task subtask checklist (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 | Task time estimate/spent (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 | Task attachments (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
+| Task issue reference (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
+| Archived tasks (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 | Project task index note (needs task-note sync) | Super Productivity → Joplin only | Super Productivity always wins |
 
 Completed tasks get a `[Done] ` prefix on their Joplin note title — unless
@@ -111,6 +113,24 @@ images (web images shown inline) and local files as `file://` links. The files
 themselves aren't copied into Joplin, so a file link only opens on a computer
 that has the file at that path. One-way, in the same block as subtasks and time
 stats.
+
+## Issue references
+
+With **Sync issue references** on (needs task-note sync), a task imported from an
+issue tracker gets a line at the bottom of its Joplin note with the provider and
+issue id (for example `🔗 Issue: GITHUB 123`). It is a clickable link only when
+the id is itself a web URL: Super Productivity doesn't share its issue-provider
+settings (host, repository) with plugins, so URLs can't be built for GitHub,
+Jira and similar.
+
+## Archived tasks
+
+By default a task's Joplin note is deleted (or moved to the Archive sub-notebook)
+once the task is archived in Super Productivity. With **Keep archived tasks in
+Joplin** on (needs task-note sync), archived tasks that have notes, or were
+synced before, keep their notes. They are one-way: Joplin edits and done-state
+changes are never pulled back into an archived task. If the archive can't be
+read, that sync run is skipped instead of cleaning up notes.
 
 ## Project task index note
 

@@ -83,6 +83,18 @@
       "title": "Sync a project task index note",
       "description": "Only takes effect when \"Sync task notes\" is on. Creates an \"Overview\" note in each project's Joplin sub-notebook linking to every one of its task notes, as a table of contents. Always one-way (Super Productivity → Joplin) and regenerated in full on every sync.",
       "default": false
+    },
+    "syncArchivedTasks": {
+      "type": "boolean",
+      "title": "Keep archived tasks in Joplin",
+      "description": "Only takes effect when \"Sync task notes\" is on. Archived tasks keep (or get) their Joplin notes instead of being removed or moved to the \"Archive\" sub-notebook when the task leaves the active list. Archived tasks are one-way (Super Productivity → Joplin): Joplin edits and done-state changes are never pulled back into them. Only archived tasks that have notes, or were synced before, are included.",
+      "default": false
+    },
+    "syncTaskIssueLinks": {
+      "type": "boolean",
+      "title": "Sync issue references",
+      "description": "Only takes effect when \"Sync task notes\" is on. For tasks imported from an issue tracker, adds a line to the bottom of the Joplin note with the provider and issue id. It is a clickable link only when the issue id is itself a web URL; Super Productivity doesn't share its issue-provider settings with plugins, so URLs can't be built for GitHub, Jira and similar. Always one-way (Super Productivity → Joplin).",
+      "default": false
     }
   },
   "required": []

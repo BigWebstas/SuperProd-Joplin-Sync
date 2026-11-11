@@ -60,7 +60,7 @@
 
 // Keep in step with manifest.json/package.json: the plugin can't read its own
 // manifest, so this is what the update check compares against.
-const PLUGIN_VERSION = '1.12.0';
+const PLUGIN_VERSION = '1.13.0';
 const RELEASES_API_URL =
   'https://api.github.com/repos/BigWebstas/SuperProd-Joplin-Sync/releases/latest';
 
@@ -609,7 +609,9 @@ for (const project of projects) {
 
       for (const item of taskNotes) {
         const existing = byTaskId.get(item.id) || null;
-        const decision = decideTaskAction(item, existing, { oneWay: taskNotesOneWay });
+        const decision = decideTaskAction(item, existing, {
+          oneWay: taskNotesOneWay || item.archived === true,
+        });
         const spContent = stripTaskMarker(item.body);
         // The title (e.g. a "[Done]" prefix toggling when a task is
         // completed) is SP-driven and one-way, independent of the two-way
@@ -631,7 +633,7 @@ for (const project of projects) {
         // (first sync, or older plugin versions) SP wins, as before.
         let donePull = null;
         let doneDeferred = false;
-        if (twoWayDone && desiredTodo && existing && existing.is_todo) {
+        if (twoWayDone && !item.archived && desiredTodo && existing && existing.is_todo) {
           const joplinDone = existing.todo_completed > 0;
           const spDone = desiredTodo.todo_completed > 0;
           if (joplinDone !== spDone && item.lastSyncedDone === spDone) {
@@ -893,12 +895,32 @@ function buildTaskDecoration(task, config, tasksById) {
     );
   }
 
+  if (config.syncTaskIssueLinks) {
+    const line = issueLinkMarkdown(task);
+    if (line) blocks.push(line);
+  }
+
   if (config.syncTaskAttachments) {
     const lines = (task.attachments || []).map(attachmentMarkdown).filter((l) => !!l);
     if (lines.length > 0) blocks.push(['**Attachments**', ...lines].join('\n'));
   }
 
   return blocks.join('\n\n');
+}
+
+// A one-line reference to the issue a task was imported from. Super
+// Productivity doesn't expose issue-provider settings (host, repo) to plugins,
+// so a clickable URL can only be built when the issue id is itself a web URL;
+// otherwise it's plain text: provider and id.
+function issueLinkMarkdown(task) {
+  const id = String(task.issueId || '').trim();
+  if (!id) return '';
+  const type = String(task.issueType || '').replace(/^plugin:/i, '').trim();
+  const label = type ? `${type} ${id}` : id;
+  if (/^https?:\/\/\S+$/i.test(id)) {
+    return `🔗 Issue: [${label.replace(/[[\]]/g, '')}](<${id}>)`;
+  }
+  return `🔗 Issue: ${label}`;
 }
 
 // One markdown list line per Super Productivity task attachment, or '' for
@@ -1112,6 +1134,8 @@ async function loadEffectiveConfig() {
     syncTaskTimeStats: cfg.syncTaskTimeStats === true,
     syncTaskAttachments: cfg.syncTaskAttachments === true,
     syncProjectIndex: cfg.syncProjectIndex === true,
+    syncArchivedTasks: cfg.syncArchivedTasks === true,
+    syncTaskIssueLinks: cfg.syncTaskIssueLinks === true,
   };
 }
 
@@ -1183,6 +1207,32 @@ async function performSync(trigger) {
   const tasksById = appState.tasks || {};
   const tagsById = appState.tags || {};
   const allTasks = Object.values(tasksById);
+
+  // Archived tasks live outside the live app state. With the option on they're
+  // synced like live tasks (one-way) so their notes aren't swept up as orphans
+  // when a task is archived. If they can't be read, abort rather than run the
+  // orphan sweep without them — that would remove or archive their notes.
+  let archivedTasks = [];
+  if (config.syncTaskNotes && config.syncArchivedTasks) {
+    try {
+      archivedTasks = (await PluginAPI.getArchivedTasks()) || [];
+    } catch (e) {
+      lastSyncInfo = {
+        at: Date.now(),
+        trigger,
+        success: false,
+        error: 'Could not read archived tasks (' + (e && e.message ? e.message : e) + ')',
+      };
+      return lastSyncInfo;
+    }
+  }
+  const archivedIds = new Set();
+  const lookupById = Object.assign({}, tasksById);
+  for (const t of archivedTasks) {
+    if (!t || !t.id || tasksById[t.id]) continue;
+    archivedIds.add(t.id);
+    lookupById[t.id] = t;
+  }
   const syncTaskTags = config.syncTaskNotes && config.syncTaskTags;
 
   const taskSyncState = config.syncTaskNotes
@@ -1197,7 +1247,7 @@ async function performSync(trigger) {
   // baseline stays keyed on a single stable id.
   const latestTaskBySyncId = new Map();
   if (config.syncTaskNotes) {
-    for (const t of allTasks) {
+    for (const t of allTasks.concat(archivedTasks.filter((a) => archivedIds.has(a.id)))) {
       const syncId = normalizeTaskId(t.id);
       const spUpdated = t.updated || t.created || 0;
       const current = latestTaskBySyncId.get(syncId);
@@ -1253,7 +1303,8 @@ async function performSync(trigger) {
               return {
                 id: syncId,
                 title,
-                body: buildTaskBody(t, syncId, buildTaskDecoration(t, config, tasksById)),
+                body: buildTaskBody(t, syncId, buildTaskDecoration(t, config, lookupById)),
+                archived: archivedIds.has(t.id) ? true : undefined,
                 created: t.created,
                 spUpdated: t.updated || t.created || 0,
                 lastSynced,

@@ -8,6 +8,18 @@ The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Every user-visible change bumps `version` in `manifest.json` and
 `package.json`, plus `PLUGIN_VERSION` in `plugin.js`.
 
+## [1.13.0] - 2026-11-11
+
+### Added
+- **Keep archived tasks in Joplin** setting (`syncArchivedTasks`, off by
+  default, needs "Sync task notes"). Archived tasks keep their Joplin notes
+  instead of being deleted or moved to "Archive". They are one-way. If the
+  archive can't be read, the sync run is skipped.
+- **Sync issue references** setting (`syncTaskIssueLinks`, off by default, needs
+  "Sync task notes"). Adds the issue provider and id to the bottom of the note
+  for tasks imported from an issue tracker; clickable only when the id is a web
+  URL, since Super Productivity doesn't expose issue-provider settings.
+
 ## [1.12.0] - 2026-10-03
 
 ### Added
