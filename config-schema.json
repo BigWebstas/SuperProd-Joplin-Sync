@@ -1,117 +1,117 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Joplin Notes Sync Settings",
-  "description": "Non-secret connection settings. Set your Joplin API token from the plugin's own page (Menu → Joplin Notes Sync) — it is stored as a local secret, never here.",
+  "description": "Connection and sync options. Set your Joplin API token on the plugin's own page (Menu → Joplin Notes Sync); it's stored as a local secret, never here.",
   "type": "object",
   "properties": {
     "joplinUrl": {
       "type": "string",
-      "title": "Joplin Web Clipper URL",
-      "description": "Base URL of Joplin's local Web Clipper API. Enable it in Joplin under Options → Web Clipper.",
+      "title": "General: Joplin Web Clipper URL",
+      "description": "Joplin's local Web Clipper address (Joplin → Options → Web Clipper).",
       "default": "http://127.0.0.1:41184"
     },
     "parentNotebookTitle": {
       "type": "string",
-      "title": "Parent notebook",
-      "description": "Notebook created in Joplin to hold one sub-notebook per Super Productivity project.",
+      "title": "General: Parent notebook",
+      "description": "Joplin notebook that holds one sub-notebook per project.",
       "default": "Super Productivity"
     },
     "syncIntervalSec": {
       "type": "integer",
-      "title": "Auto-sync interval (seconds)",
-      "description": "How often to check for changed notes and push them to Joplin. Set to 0 to disable automatic sync (manual button only). Values under 15 are treated as 15.",
+      "title": "General: Auto-sync interval (seconds)",
+      "description": "How often to sync. 0 = manual only; minimum 15.",
       "minimum": 0,
       "maximum": 3600,
       "default": 60
     },
+    "archiveRemovedNotes": {
+      "type": "boolean",
+      "title": "General: Archive instead of delete",
+      "description": "Move notes removed from Super Productivity to an “Archive” sub-notebook instead of deleting them.",
+      "default": false
+    },
     "syncTaskNotes": {
       "type": "boolean",
-      "title": "Sync task notes",
-      "description": "Sync each task's own Notes field (opened from the task itself) with a \"Tasks\" sub-notebook under the project. Two-way by default — edits in either app get pushed to the other, and if a task's notes changed in both places since the last sync, the more recently edited side wins. Enable \"One-way task notes\" below to make Super Productivity the only source of truth instead. Separate from the project's Notes tab, which is always synced one-way.",
+      "title": "Tasks: Sync task notes",
+      "description": "Sync each task's Notes field with a “Tasks” sub-notebook per project. Two-way; the most recent edit wins.",
       "default": false
     },
     "taskNotesOneWay": {
       "type": "boolean",
-      "title": "One-way task notes (Super Productivity → Joplin)",
-      "description": "Only takes effect when \"Sync task notes\" is on. Makes task notes one-way, like project notes: edits made directly in Joplin are never pulled back into Super Productivity and get overwritten by Super Productivity's content on the next sync.",
-      "default": false
-    },
-    "syncTaskTags": {
-      "type": "boolean",
-      "title": "Sync task tags",
-      "description": "Only takes effect when \"Sync task notes\" is on. Sets each task's Joplin note to have the same Joplin tags as the task's Super Productivity tags. Always one-way (Super Productivity → Joplin) — Joplin-side tag changes are never read back.",
-      "default": false
-    },
-    "archiveRemovedNotes": {
-      "type": "boolean",
-      "title": "Archive removed notes instead of deleting",
-      "description": "When a note (or task note) no longer exists on the Super Productivity side, move its Joplin note into an \"Archive\" sub-notebook instead of deleting it outright.",
-      "default": false
-    },
-    "syncProjectIcons": {
-      "type": "boolean",
-      "title": "Sync project icons and colours",
-      "description": "Give each project's Joplin sub-notebook a custom icon: the project's icon glyph on a tile filled with the project's theme colour. One-way (Super Productivity → Joplin). Joplin has no notebook colour field, so the colour is carried inside the icon image. Only projects that have at least one note to sync get their icon. Turning this off later leaves icons already set in place.",
-      "default": false
-    },
-    "syncTaskDueDates": {
-      "type": "boolean",
-      "title": "Sync task due dates and done state",
-      "description": "Only takes effect when \"Sync task notes\" is on. Turns each task's Joplin note into a real to-do: its due date is set as Joplin's own to-do due date, and its checkbox follows the task's done state (replacing the \"[Done]\" title prefix). The due date is one-way (Super Productivity → Joplin). The done state is two-way unless \"One-way task notes\" is on: ticking or unticking the to-do in Joplin marks the task done or not done in Super Productivity.",
-      "default": false
-    },
-    "syncTaskSubtasks": {
-      "type": "boolean",
-      "title": "Sync subtasks as a checklist",
-      "description": "Only takes effect when \"Sync task notes\" is on. Appends a checklist of each task's subtasks (with their done state) to the bottom of its Joplin note. Always one-way (Super Productivity → Joplin) and read-only in Joplin — it's regenerated from Super Productivity on every sync, so edits to the checklist itself in Joplin don't stick.",
-      "default": false
-    },
-    "syncTaskTimeStats": {
-      "type": "boolean",
-      "title": "Sync task time estimate/spent",
-      "description": "Only takes effect when \"Sync task notes\" is on. Appends a one-line time-tracking summary (time logged vs. estimated) to the bottom of each task's Joplin note. Always one-way (Super Productivity → Joplin).",
-      "default": false
-    },
-    "syncTaskAttachments": {
-      "type": "boolean",
-      "title": "Sync task attachments as links",
-      "description": "Only takes effect when \"Sync task notes\" is on. Appends a list of each task's attachments to the bottom of its Joplin note: links, images (web images shown inline) and local files (as file:// links — the files themselves aren't copied into Joplin). Always one-way (Super Productivity → Joplin).",
-      "default": false
-    },
-    "syncProjectIndex": {
-      "type": "boolean",
-      "title": "Sync a project task index note",
-      "description": "Only takes effect when \"Sync task notes\" is on. Creates an \"Overview\" note in each project's Joplin sub-notebook linking to every one of its task notes, as a table of contents. Always one-way (Super Productivity → Joplin) and regenerated in full on every sync.",
+      "title": "Tasks: One-way only (Super Productivity → Joplin)",
+      "description": "Needs “Tasks: Sync task notes”. Never pull Joplin edits back; Super Productivity always wins.",
       "default": false
     },
     "syncArchivedTasks": {
       "type": "boolean",
-      "title": "Keep archived tasks in Joplin",
-      "description": "Only takes effect when \"Sync task notes\" is on. Archived tasks keep (or get) their Joplin notes instead of being removed or moved to the \"Archive\" sub-notebook when the task leaves the active list. Archived tasks are one-way (Super Productivity → Joplin): Joplin edits and done-state changes are never pulled back into them. Only archived tasks that have notes, or were synced before, are included.",
+      "title": "Tasks: Keep archived tasks",
+      "description": "Needs “Tasks: Sync task notes”. Archived tasks keep their Joplin notes (one-way) instead of being removed.",
+      "default": false
+    },
+    "syncTaskTags": {
+      "type": "boolean",
+      "title": "Task note extras: Tags",
+      "description": "Needs “Tasks: Sync task notes”. Give each note the task's tags. One-way.",
+      "default": false
+    },
+    "syncTaskDueDates": {
+      "type": "boolean",
+      "title": "Task note extras: Due date and done state",
+      "description": "Needs “Tasks: Sync task notes”. Make notes Joplin to-dos with the due date. Done state syncs both ways unless one-way is on.",
+      "default": false
+    },
+    "syncTaskSubtasks": {
+      "type": "boolean",
+      "title": "Task note extras: Subtask checklist",
+      "description": "Needs “Tasks: Sync task notes”. Append a read-only subtask checklist. One-way.",
+      "default": false
+    },
+    "syncTaskTimeStats": {
+      "type": "boolean",
+      "title": "Task note extras: Time spent / estimate",
+      "description": "Needs “Tasks: Sync task notes”. Append a time logged vs. estimated line. One-way.",
+      "default": false
+    },
+    "syncTaskAttachments": {
+      "type": "boolean",
+      "title": "Task note extras: Attachments",
+      "description": "Needs “Tasks: Sync task notes”. Append links, images and file:// links (files aren't copied). One-way.",
       "default": false
     },
     "syncTaskIssueLinks": {
       "type": "boolean",
-      "title": "Sync issue references",
-      "description": "Only takes effect when \"Sync task notes\" is on. For tasks imported from an issue tracker, adds a line to the bottom of the Joplin note with the provider and issue id. It is a clickable link only when the issue id is itself a web URL; Super Productivity doesn't share its issue-provider settings with plugins, so URLs can't be built for GitHub, Jira and similar. Always one-way (Super Productivity → Joplin).",
+      "title": "Task note extras: Issue reference",
+      "description": "Needs “Tasks: Sync task notes”. Append the issue provider and id; a link only if the id is a URL. One-way.",
       "default": false
     },
     "syncTaskRepeatInfo": {
       "type": "boolean",
-      "title": "Sync repeat rule",
-      "description": "Only takes effect when \"Sync task notes\" is on. For tasks created by a repeating-task setup, adds a line to the bottom of the Joplin note describing the rule (for example \"Repeats every 2 weeks (Mon, Wed)\", with \"paused\" if the repeat is paused). Always one-way (Super Productivity → Joplin).",
+      "title": "Task note extras: Repeat rule",
+      "description": "Needs “Tasks: Sync task notes”. Append the repeat rule, e.g. “Repeats every 2 weeks (Mon, Wed)”. One-way.",
+      "default": false
+    },
+    "syncProjectIcons": {
+      "type": "boolean",
+      "title": "Projects: Icons and colours",
+      "description": "Give each project notebook an icon on a tile in the project colour. One-way.",
+      "default": false
+    },
+    "syncProjectIndex": {
+      "type": "boolean",
+      "title": "Projects: Task index note",
+      "description": "Needs “Tasks: Sync task notes”. Add an “Overview” note linking every task note in the project. One-way.",
       "default": false
     },
     "syncDailySummary": {
       "type": "boolean",
-      "title": "Write daily summary notes",
-      "description": "Writes one note per day (YYYY-MM-DD) into a \"Daily summaries\" notebook under the parent notebook, listing the tasks completed that day and the time tracked per task, using Super Productivity's start-of-next-day setting. The last 7 days are refreshed on every sync; older notes are left as they are. Does not need \"Sync task notes\". One-way, and the notes are regenerated, so edits to them in Joplin are overwritten.",
+      "title": "Daily summary: Write daily notes",
+      "description": "One note per day in a “Daily summaries” notebook: tasks completed and time per task. Last 7 days refreshed each sync.",
       "default": false
     },
     "dailySummaryCharts": {
       "type": "boolean",
-      "title": "Add charts to daily summaries",
-      "description": "Only takes effect when \"Write daily summary notes\" is on. Adds Mermaid pie charts at the top of each day's note: time by project, time by task and completed tasks by project (a chart is left out when it would have fewer than two slices). Joplin renders Mermaid diagrams in its viewer; other markdown apps show the code instead.",
+      "title": "Daily summary: Add charts",
+      "description": "Needs “Daily summary: Write daily notes”. Mermaid pie charts at the top of each note (Joplin's viewer renders them).",
       "default": true
     }
   },

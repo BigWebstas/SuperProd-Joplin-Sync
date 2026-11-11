@@ -10,6 +10,12 @@ Every user-visible change bumps `version` in `manifest.json` and
 
 ## [1.14.0] - 2026-11-11
 
+### Changed
+- **Settings are grouped by category and the descriptions are shorter.** The
+  settings list is ordered General, Tasks, Task note extras, Projects, Daily
+  summary, and each title starts with its category. Setting keys and defaults
+  are unchanged, so existing configuration carries over.
+
 ### Added
 - **Charts in daily summaries** (`dailySummaryCharts`, on by default, needs
   "Write daily summary notes"). Mermaid pie charts at the top of each day's
