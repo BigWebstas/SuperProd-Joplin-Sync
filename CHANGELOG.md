@@ -10,47 +10,46 @@ Every user-visible change bumps `version` in `manifest.json` and
 
 ## [1.14.0] - 2026-11-11
 
-### Fixed
-- **Transient Joplin errors are retried.** Connection errors, HTTP 429/502/503/504
-  and timeouts on repeatable requests are retried with a short backoff before a
-  sync is reported as failed. A timed-out note creation is never retried, so it
-  can't create a duplicate.
-- **"Plugin data exceeds maximum size of 256KB" sync failure.** The saved
-  two-way sync state held the full text of every task note. It now holds a
-  short fingerprint per note instead (about 8 KB for 300 two-KB notes), and
-  existing state is converted on the next sync.
-
-### Changed
-- **The plugin page's settings summary** now lists every option, grouped like the
-  settings dialog, and flags options that are on but inactive because task-note
-  sync is off.
-- **Settings are grouped by category and the descriptions are shorter.** The
-  settings list is ordered General, Tasks, Task note extras, Projects, Daily
-  summary, and each title starts with its category. Setting keys and defaults
-  are unchanged, so existing configuration carries over.
-
 ### Added
-- **Failure dialog.** When a sync fails, a dialog shows the error with a hint
-  for common causes (Node permission, missing token, Joplin not reachable) and
-  a Retry button. A manual sync always shows it; automatic syncs show it once
-  per distinct error and stay quiet until a sync succeeds again.
-- **Icon on the “Daily summaries” notebook** (a 📅 on a blue tile), drawn like
-  the project icons and controlled by the same “Icons and colours” setting.
 - **Charts in daily summaries** (`dailySummaryCharts`, on by default, needs
   "Write daily summary notes"). Mermaid pie charts at the top of each day's
   note: time by project, time by task, and completed tasks by project. A chart
   with fewer than two slices is left out. Rendered by Joplin's viewer.
+- **Icon on the “Daily summaries” notebook** (a 📅 on a blue tile), drawn like
+  the project icons and controlled by the same “Icons and colours” setting.
 - **Sync progress.** The plugin page shows a progress bar with a percentage, the
   current project and elapsed time while a sync runs, and picks up an
   auto-sync already in progress.
+- **Failure dialog.** When a sync fails, a dialog shows the error with a hint
+  for common causes (Node permission, missing token, Joplin not reachable) and
+  a Retry button. A manual sync always shows it; automatic syncs show it once
+  per distinct error and stay quiet until a sync succeeds again.
+- **Test suite.** `npm test` runs 15 tests against a fake Super Productivity API
+  and a mock Joplin.
+
+### Changed
+- **Settings are grouped by category and the descriptions are shorter.** The
+  list is ordered General, Tasks, Task note extras, Projects, Daily summary, and
+  each title starts with its category. Setting keys and defaults are unchanged,
+  so existing configuration carries over.
+- **The plugin page's settings summary** lists every option, grouped like the
+  settings dialog, and flags options that are on but inactive because task-note
+  sync is off.
 
 ### Fixed
-- A long sync (for example the first one on a big library) no longer makes the
-  page show "Message timeout" and then "Not synced yet" while it is still
-  working. **Sync now** returns immediately and the page follows the sync's
-  progress.
-- An unexpected error during a sync is now stored and shown as "Failed: …"
-  instead of leaving the page on "Not synced yet".
+- **"Plugin data exceeds maximum size of 256KB" sync failure.** The saved
+  two-way sync state held the full text of every task note. It now holds a
+  short fingerprint per note instead (about 8 KB for 300 two-KB notes), and
+  existing state is converted on the next sync.
+- **Long syncs no longer look like "Not synced yet".** The page used to give up
+  waiting after 15 seconds (a first sync of a big library takes longer) while
+  the sync kept running. **Sync now** returns immediately and the page follows
+  the progress. An unexpected error during a sync is now stored and shown as
+  "Failed: …".
+- **Transient Joplin errors are retried.** Connection errors, HTTP 429/502/503/504
+  and timeouts on repeatable requests are retried with a short backoff before a
+  sync is reported as failed. A timed-out note creation is never retried, so it
+  can't create a duplicate.
 
 ## [1.13.0] - 2026-11-11
 
