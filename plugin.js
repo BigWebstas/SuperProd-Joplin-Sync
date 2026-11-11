@@ -120,6 +120,25 @@ function normalizeTaskId(id) {
   return String(id).replace(CALENDAR_OCCURRENCE_SUFFIX_RE, '');
 }
 
+// Wraps a Joplin request function so transient failures are retried with a short
+// backoff (400ms, then 1.6s). Only errors the request function marks `retryable`
+// are retried: connection errors, 429/502/503/504, and timeouts on requests that
+// are safe to repeat. A timed-out POST is never retried (the note may already
+// exist). A timeout is retried once, since each one already costs 10s. Inlined
+// into both Node scripts via toString().
+function withRetry(once) {
+  return async function (method, path, body) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await once(method, path, body);
+      } catch (e) {
+        if (!e.retryable || attempt >= (e.slow ? 1 : 2)) throw e;
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1) * (attempt + 1)));
+      }
+    }
+  };
+}
+
 // Short fingerprint of a task note's content (cyrb53 plus the length). The
 // two-way diff only needs to know whether a note changed since the last sync,
 // so the saved baseline is this, not the whole text: Super Productivity caps
@@ -151,6 +170,7 @@ const http = require('http');
 const https = require('https');
 
 ${hashText.toString()}
+${withRetry.toString()}
 const input = args[0] || {};
 const baseUrl = String(input.baseUrl || '').replace(/\\/+$/, '');
 const token = String(input.token || '');
@@ -203,7 +223,7 @@ const twoWayDone = syncTaskDueDates && !taskNotesOneWay;
 // the last call is guaranteed to see every note already synced this run.
 const syncProjectIndex = input.syncProjectIndex === true && syncTaskNotes;
 
-function apiRequest(method, path, body) {
+function apiRequestOnce(method, path, body) {
   return new Promise((resolve, reject) => {
     let url;
     try {
@@ -246,20 +266,30 @@ function apiRequest(method, path, body) {
           } else {
             const msg =
               parsed && parsed.error ? parsed.error : raw || 'HTTP ' + res.statusCode;
-            reject(new Error(method + ' ' + path + ' failed (' + res.statusCode + '): ' + msg));
+            const err = new Error(method + ' ' + path + ' failed (' + res.statusCode + '): ' + msg);
+            err.retryable = [429, 502, 503, 504].includes(res.statusCode);
+            reject(err);
           }
         });
       },
     );
     req.on('timeout', () => {
       req.destroy();
-      reject(new Error('Joplin request timed out: ' + method + ' ' + path));
+      const err = new Error('Joplin request timed out: ' + method + ' ' + path);
+      err.retryable = method !== 'POST';
+      err.slow = true;
+      reject(err);
     });
-    req.on('error', (err) => reject(new Error('Joplin request error: ' + err.message)));
+    req.on('error', (e) => {
+      const err = new Error('Joplin request error: ' + e.message);
+      err.retryable = method !== 'POST' || e.code === 'ECONNREFUSED';
+      reject(err);
+    });
     if (payload) req.write(payload);
     req.end();
   });
 }
+const apiRequest = withRetry(apiRequestOnce);
 
 async function listAll(path, fields) {
   const items = [];
@@ -1694,11 +1724,12 @@ const DAILY_MAX_LINES = 100;
 const DAILY_MAX_PAYLOAD_CHARS = 18000;
 
 const NODE_DAILY_SCRIPT = compactNodeScript(`
+${withRetry.toString()}
 const http = require('http');
 const https = require('https');
 const input = args[0] || {};
 const baseUrl = String(input.baseUrl || '').replace(/\\/+$/, '');
-function api(method, path, body) {
+function apiOnce(method, path, body) {
   return new Promise((resolve, reject) => {
     const url = new URL(baseUrl + path);
     url.searchParams.set('token', String(input.token || ''));
@@ -1723,17 +1754,25 @@ function api(method, path, body) {
               resolve(null);
             }
           } else {
-            reject(new Error(method + ' ' + path + ' failed (' + res.statusCode + ')'));
+            const err = new Error(method + ' ' + path + ' failed (' + res.statusCode + ')');
+            err.retryable = [429, 502, 503, 504].includes(res.statusCode);
+            reject(err);
           }
         });
       },
     );
     req.on('timeout', () => req.destroy(new Error('timed out')));
-    req.on('error', (e) => reject(new Error('Joplin request error: ' + e.message)));
+    req.on('error', (e) => {
+      const err = new Error('Joplin request error: ' + e.message);
+      err.retryable = method !== 'POST' || e.code === 'ECONNREFUSED';
+      err.slow = e.message === 'timed out';
+      reject(err);
+    });
     if (payload) req.write(payload);
     req.end();
   });
 }
+const api = withRetry(apiOnce);
 async function listAll(path, fields) {
   const items = [];
   for (let page = 1; page <= 20; page++) {

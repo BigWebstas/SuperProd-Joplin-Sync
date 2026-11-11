@@ -11,12 +11,19 @@ Every user-visible change bumps `version` in `manifest.json` and
 ## [1.14.0] - 2026-11-11
 
 ### Fixed
+- **Transient Joplin errors are retried.** Connection errors, HTTP 429/502/503/504
+  and timeouts on repeatable requests are retried with a short backoff before a
+  sync is reported as failed. A timed-out note creation is never retried, so it
+  can't create a duplicate.
 - **"Plugin data exceeds maximum size of 256KB" sync failure.** The saved
   two-way sync state held the full text of every task note. It now holds a
   short fingerprint per note instead (about 8 KB for 300 two-KB notes), and
   existing state is converted on the next sync.
 
 ### Changed
+- **The plugin page's settings summary** now lists every option, grouped like the
+  settings dialog, and flags options that are on but inactive because task-note
+  sync is off.
 - **Settings are grouped by category and the descriptions are shorter.** The
   settings list is ordered General, Tasks, Task note extras, Projects, Daily
   summary, and each title starts with its category. Setting keys and defaults

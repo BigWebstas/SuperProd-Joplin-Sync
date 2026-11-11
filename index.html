@@ -56,6 +56,30 @@
         white-space: pre-wrap;
         font-size: 0.85rem;
       }
+      .cfg-group {
+        margin: 0 0 var(--s);
+      }
+      .cfg-group h3 {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin: 0 0 2px;
+      }
+      .cfg-row {
+        display: flex;
+        gap: var(--s);
+        font-size: 0.85rem;
+        padding: 1px 0;
+      }
+      .cfg-row .label {
+        flex: 0 0 11em;
+      }
+      .cfg-row .value {
+        word-break: break-word;
+      }
+      .cfg-row .value.off {
+        opacity: 0.6;
+      }
     </style>
   </head>
   <body>
@@ -115,18 +139,12 @@
     </div>
 
     <div class="card">
-      <h2>2. Connection settings</h2>
+      <h2>2. Current settings</h2>
       <p class="text-muted">
-        Joplin URL, parent notebook name, auto-sync interval, and whether task notes are
-        synced are configured in
+        Read-only summary. Change these in
         <strong>Settings → Plugins → Joplin Notes Sync</strong>.
       </p>
-      <div
-        id="configSummary"
-        class="status text-muted"
-      >
-        Loading…
-      </div>
+      <div id="configSummary">Loading…</div>
     </div>
 
     <div class="card">
@@ -211,6 +229,89 @@
         return `[${when}] (${info.trigger})\n` + lines.join('\n');
       }
 
+      // Same categories, order and names as the settings dialog.
+      function renderConfigSummary(c) {
+        const taskOn = !!c.syncTaskNotes;
+        const flag = (on, needsTasks) =>
+          on ? (needsTasks && !taskOn ? 'on (inactive: needs “Sync task notes”)' : 'on') : 'off';
+        const groups = [
+          [
+            'General',
+            [
+              ['Joplin URL', c.joplinUrl],
+              ['Parent notebook', c.parentNotebookTitle],
+              [
+                'Auto-sync interval',
+                c.syncIntervalSec > 0 ? c.syncIntervalSec + 's' : 'disabled',
+              ],
+              ['Archive instead of delete', flag(c.archiveRemovedNotes)],
+            ],
+          ],
+          [
+            'Tasks',
+            [
+              [
+                'Sync task notes',
+                taskOn ? (c.taskNotesOneWay ? 'on (one-way)' : 'on (two-way)') : 'off',
+              ],
+              ['Keep archived tasks', flag(c.syncArchivedTasks, true)],
+            ],
+          ],
+          [
+            'Task note extras',
+            [
+              ['Tags', flag(c.syncTaskTags, true)],
+              ['Due date and done state', flag(c.syncTaskDueDates, true)],
+              ['Subtask checklist', flag(c.syncTaskSubtasks, true)],
+              ['Time spent / estimate', flag(c.syncTaskTimeStats, true)],
+              ['Attachments', flag(c.syncTaskAttachments, true)],
+              ['Issue reference', flag(c.syncTaskIssueLinks, true)],
+              ['Repeat rule', flag(c.syncTaskRepeatInfo, true)],
+            ],
+          ],
+          [
+            'Projects',
+            [
+              ['Icons and colours', flag(c.syncProjectIcons)],
+              ['Task index note', flag(c.syncProjectIndex, true)],
+            ],
+          ],
+          [
+            'Daily summary',
+            [
+              ['Write daily notes', flag(c.syncDailySummary)],
+              [
+                'Add charts',
+                c.syncDailySummary ? flag(c.dailySummaryCharts) : 'off',
+              ],
+            ],
+          ],
+        ];
+        const root = document.getElementById('configSummary');
+        root.replaceChildren();
+        for (const [title, rows] of groups) {
+          const group = document.createElement('div');
+          group.className = 'cfg-group';
+          const heading = document.createElement('h3');
+          heading.className = 'text-muted';
+          heading.textContent = title;
+          group.appendChild(heading);
+          for (const [label, value] of rows) {
+            const row = document.createElement('div');
+            row.className = 'cfg-row';
+            const l = document.createElement('span');
+            l.className = 'label text-muted';
+            l.textContent = label;
+            const v = document.createElement('span');
+            v.className = 'value' + (value === 'off' || value === 'disabled' ? ' off' : '');
+            v.textContent = String(value);
+            row.append(l, v);
+            group.appendChild(row);
+          }
+          root.appendChild(group);
+        }
+      }
+
       function renderProgress(progress) {
         const active = !!(progress && progress.active);
         document.getElementById('progressWrap').hidden = !active;
@@ -250,28 +351,7 @@
             badge.textContent = 'not set';
             badge.className = 'badge warn';
           }
-          document.getElementById('configSummary').textContent =
-            `Joplin URL: ${state.config.joplinUrl}\n` +
-            `Parent notebook: ${state.config.parentNotebookTitle}\n` +
-            `Auto-sync interval: ${
-              state.config.syncIntervalSec > 0
-                ? state.config.syncIntervalSec + 's'
-                : 'disabled'
-            }\n` +
-            `Sync task notes: ${
-              state.config.syncTaskNotes
-                ? state.config.taskNotesOneWay
-                  ? 'on (one-way)'
-                  : 'on (two-way)'
-                : 'off'
-            }\n` +
-            `Sync task tags: ${
-              state.config.syncTaskNotes && state.config.syncTaskTags ? 'on' : 'off'
-            }\n` +
-            `Archive removed notes: ${state.config.archiveRemovedNotes ? 'on' : 'off'}\n` +
-            `Sync project icons/colours: ${
-              state.config.syncProjectIcons ? 'on' : 'off'
-            }`;
+          renderConfigSummary(state.config);
           renderProgress(state.syncProgress);
           document.getElementById('syncNowBtn').disabled = !!(
             state.syncProgress && state.syncProgress.active

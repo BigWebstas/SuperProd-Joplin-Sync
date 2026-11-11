@@ -187,6 +187,14 @@ local cache.
   any such group automatically, keeping the newest.
 - Only **active projects with at least one note** are synced.
 
+## Development
+
+`npm test` runs the test suite (Node 20+, no dependencies). It loads the real
+`plugin.js` against a fake Super Productivity API and an in-memory mock of
+Joplin's Web Clipper API: sync, two-way pulls, saved-state size, archived tasks,
+daily summaries, the failure dialog, progress and retries. `scripts/community-entry.py`
+builds the release zip and prints the Super Productivity community-list entry.
+
 ## Changelog
 
 Version history: [CHANGELOG.md](CHANGELOG.md). Full write-ups and downloadable
