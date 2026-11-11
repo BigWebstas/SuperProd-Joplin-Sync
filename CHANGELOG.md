@@ -23,6 +23,10 @@ Every user-visible change bumps `version` in `manifest.json` and
   are unchanged, so existing configuration carries over.
 
 ### Added
+- **Failure dialog.** When a sync fails, a dialog shows the error with a hint
+  for common causes (Node permission, missing token, Joplin not reachable) and
+  a Retry button. A manual sync always shows it; automatic syncs show it once
+  per distinct error and stay quiet until a sync succeeds again.
 - **Icon on the “Daily summaries” notebook** (a 📅 on a blue tile), drawn like
   the project icons and controlled by the same “Icons and colours” setting.
 - **Charts in daily summaries** (`dailySummaryCharts`, on by default, needs

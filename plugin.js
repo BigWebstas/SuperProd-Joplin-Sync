@@ -1970,6 +1970,70 @@ async function checkForUpdate() {
   }
 }
 
+// Failure dialog. A manual sync always shows it. Automatic syncs run every
+// interval, so they show it once per distinct error and stay quiet until a sync
+// succeeds again, and never stack a second dialog on an open one.
+let lastReportedFailure = null;
+let failureDialogOpen = false;
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function syncFailureHint(message) {
+  if (/permission was not granted|NO_CONSENT|PERMISSION_DENIED/i.test(message)) {
+    return 'Allow Node execution for this plugin: Settings → Plugins → Joplin Notes Sync (re-enable it if it was disabled).';
+  }
+  if (/token/i.test(message)) {
+    return 'Open the plugin page and paste your Joplin Web Clipper token.';
+  }
+  if (/could not reach joplin|ECONNREFUSED|timed out/i.test(message)) {
+    return 'Make sure Joplin is running with the Web Clipper service enabled, and that the URL in the settings is right.';
+  }
+  if (/256KB|maximum size/i.test(message)) {
+    return 'The plugin\'s saved sync data is too large. Update to the latest plugin version.';
+  }
+  return '';
+}
+
+function reportSyncOutcome(info, trigger) {
+  if (!info) return;
+  if (info.success) {
+    lastReportedFailure = null;
+    return;
+  }
+  const message =
+    info.error ||
+    (info.totals && info.totals.errors && info.totals.errors.join('\n')) ||
+    'Unknown error';
+  if (trigger !== 'manual' && message === lastReportedFailure) return;
+  lastReportedFailure = message;
+  if (failureDialogOpen || typeof PluginAPI.openDialog !== 'function') return;
+  const hint = syncFailureHint(message);
+  failureDialogOpen = true;
+  Promise.resolve(
+    PluginAPI.openDialog({
+      title: 'Joplin sync failed',
+      htmlContent:
+        '<p>The last sync did not complete:</p>' +
+        '<pre style="white-space: pre-wrap">' + escapeHtml(message) + '</pre>' +
+        (hint ? '<p>' + escapeHtml(hint) + '</p>' : '') +
+        (trigger === 'manual' ? '' : '<p>This was an automatic sync. You won\'t be shown this again until a sync succeeds.</p>'),
+      buttons: [
+        { label: 'Retry', color: 'primary', raised: true, onClick: () => { runSync('manual'); } },
+        { label: 'Close' },
+      ],
+    }),
+  )
+    .catch((e) => console.warn('Joplin Notes Sync: could not open failure dialog', e))
+    .finally(() => {
+      failureDialogOpen = false;
+    });
+}
+
 async function runSync(trigger) {
   if (isSyncing) {
     pendingRerun = true;
@@ -1978,7 +2042,9 @@ async function runSync(trigger) {
   isSyncing = true;
   syncProgress = { active: true, percent: 0, label: 'Starting…', startedAt: Date.now() };
   try {
-    return await performSync(trigger);
+    const info = await performSync(trigger);
+    reportSyncOutcome(info, trigger);
+    return info;
   } catch (e) {
     // Keep the cause visible on the plugin page instead of a blank "not synced".
     console.warn('Joplin Notes Sync: sync failed', e);
@@ -1988,6 +2054,7 @@ async function runSync(trigger) {
       success: false,
       error: (e && e.message) || String(e),
     };
+    reportSyncOutcome(lastSyncInfo, trigger);
     return lastSyncInfo;
   } finally {
     isSyncing = false;
