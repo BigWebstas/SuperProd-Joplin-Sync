@@ -73,6 +73,7 @@ function startMockJoplin() {
 }
 
 // opts: config, tasks (array), archived (array), projects (array), spNotes (array),
+//       counters (habits, array),
 //       repeatCfgs (object), fastInterval (run auto-sync every second)
 async function createEnv(opts = {}) {
   const joplin = await startMockJoplin();
@@ -89,6 +90,7 @@ async function createEnv(opts = {}) {
     projects: opts.projects || [{ id: 'p1', title: 'Proj', noteIds: [] }],
     spNotes: Object.fromEntries((opts.spNotes || []).map((n) => [n.id, n])),
     repeatCfgs: opts.repeatCfgs || {},
+    counters: opts.counters || [],
     synced: {},
     secrets: { joplinApiToken: 'tok' },
     updates: [],
@@ -119,6 +121,7 @@ async function createEnv(opts = {}) {
       tags: {},
       projects: Object.fromEntries(sp.projects.map((p) => [p.id, p])),
       taskRepeatCfgs: sp.repeatCfgs,
+      simpleCounters: Object.fromEntries(sp.counters.map((c) => [c.id, c])),
     }),
     getArchivedTasks: async () => {
       if (sp.archiveFails) throw new Error('archive unavailable');

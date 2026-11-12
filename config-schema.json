@@ -113,6 +113,12 @@
       "title": "Daily summary: Add charts",
       "description": "Needs “Daily summary: Write daily notes”. Mermaid pie charts at the top of each note (Joplin's viewer renders them).",
       "default": true
+    },
+    "dailySummaryHabits": {
+      "type": "boolean",
+      "title": "Daily summary: Add habits",
+      "description": "Needs “Daily summary: Write daily notes”. List the habits (counters) you logged each day: counts, or time for stopwatch habits. Only habits with activity that day are shown.",
+      "default": true
     }
   },
   "required": []

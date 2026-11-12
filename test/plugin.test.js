@@ -161,6 +161,29 @@ test('daily summary: written with charts, idempotent, icon only with project ico
   });
 });
 
+test('daily summary lists habits: counts, stopwatch time, only with activity, and can be switched off', async () => {
+  const today = localDate(Date.now());
+  const counters = [
+    { id: 'c1', title: 'Water', type: 'ClickCounter', isEnabled: true, countOnDay: { [today]: 6 } },
+    { id: 'c2', title: 'Reading', type: 'StopWatch', isEnabled: true, countOnDay: { [today]: 45 * 60000 } },
+    { id: 'c3', title: 'Idle habit', type: 'ClickCounter', isEnabled: true, countOnDay: {} },
+    { id: 'c4', title: 'Disabled', type: 'ClickCounter', isEnabled: false, countOnDay: { [today]: 3 } },
+  ];
+  // No tasks at all: a day with only habits still gets a note.
+  await withEnv({ config: { syncDailySummary: true }, counters, projects: [{ id: 'p1', title: 'Proj', noteIds: [] }] }, async (env) => {
+    await env.sync();
+    const body = env.notesIn('Daily summaries')[0].body;
+    assert.match(body, /\*\*Habits \(2\)\*\*/);
+    assert.match(body, /- Water — 6×/);
+    assert.match(body, /- Reading — 45m/);
+    assert.doesNotMatch(body, /Idle habit|Disabled/);
+  });
+  await withEnv({ config: { syncDailySummary: true, dailySummaryHabits: false }, counters }, async (env) => {
+    await env.sync();
+    assert.equal(env.notesIn('Daily summaries').length, 0);
+  });
+});
+
 test('a failed manual sync shows a dialog with a hint and stores the error', () =>
   withEnv({ config: { joplinUrl: 'http://127.0.0.1:1' }, tasks: [TASK] }, async (env) => {
     env.sp.projects = [{ id: 'p1', title: 'Proj', noteIds: ['n1'] }];

@@ -41,7 +41,7 @@ option is off unless noted.
 | Tasks | Keep archived tasks | Archived tasks keep their Joplin notes (one-way) |
 | Task note extras | Tags, Due date and done state, Subtask checklist, Time spent / estimate, Attachments, Issue reference, Repeat rule | Extra detail on each task note; all need **Sync task notes** |
 | Projects | Icons and colours, Task index note | Notebook icons, and an `Overview` note per project |
-| Daily summary | Write daily notes, Add charts (on by default) | One note per day with completed tasks, time per task and pie charts |
+| Daily summary | Write daily notes, Add charts, Add habits (charts and habits on by default) | One note per day with completed tasks, time per task, habits and pie charts |
 
 The same list, with what is currently on, is shown on the plugin page.
 
@@ -164,6 +164,11 @@ notebook. It lists the tasks completed that day and the time tracked per task,
 using Super Productivity's start-of-next-day setting, and includes archived
 tasks. The notebook gets a 📅 icon when **Projects: Icons and colours** is on. The last
 7 days are refreshed on every sync; older notes are left alone.
+With **Daily summary: Add habits** on (the default), each note also lists the habits
+(counters) you logged that day: counts, or time for stopwatch habits. Only enabled
+habits with activity that day are shown, because Super Productivity doesn't share
+streak targets with plugins.
+
 With **Daily summary: Add charts** on (the default), each note starts with
 Mermaid pie charts: time by project, time by task, and completed tasks by project
 (a chart with fewer than two slices is left out). Joplin renders these in its

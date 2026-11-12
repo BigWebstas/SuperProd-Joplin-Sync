@@ -8,6 +8,15 @@ The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Every user-visible change bumps `version` in `manifest.json` and
 `package.json`, plus `PLUGIN_VERSION` in `plugin.js`.
 
+## [1.15.0] - 2026-11-11
+
+### Added
+- **Habits in daily summaries** (`dailySummaryHabits`, on by default, needs
+  "Write daily summary notes"). Each day's note lists the habits (counters) you
+  logged that day: counts, or time for stopwatch habits. Only enabled habits
+  with activity that day are shown, since Super Productivity doesn't share
+  streak targets with plugins. A day with only habits still gets a note.
+
 ## [1.14.0] - 2026-11-11
 
 ### Added

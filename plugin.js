@@ -60,7 +60,7 @@
 
 // Keep in step with manifest.json/package.json: the plugin can't read its own
 // manifest, so this is what the update check compares against.
-const PLUGIN_VERSION = '1.14.0';
+const PLUGIN_VERSION = '1.15.0';
 const RELEASES_API_URL =
   'https://api.github.com/repos/BigWebstas/SuperProd-Joplin-Sync/releases/latest';
 
@@ -1225,6 +1225,7 @@ async function loadEffectiveConfig() {
     syncTaskRepeatInfo: cfg.syncTaskRepeatInfo === true,
     syncDailySummary: cfg.syncDailySummary === true,
     dailySummaryCharts: cfg.dailySummaryCharts !== false,
+    dailySummaryHabits: cfg.dailySummaryHabits !== false,
   };
 }
 
@@ -1442,7 +1443,13 @@ async function performSync(trigger) {
     .filter((p) => p.notes.length > 0 || p.taskNotes.length > 0);
 
   if (config.syncDailySummary && archivedLoaded) {
-    await syncDailySummaries(config, token, allTasks.concat(archivedTasks), appState.projects || {});
+    await syncDailySummaries(
+      config,
+      token,
+      allTasks.concat(archivedTasks),
+      appState.projects || {},
+      Object.values(appState.simpleCounters || {}),
+    );
   }
 
   if (payloadProjects.length === 0) {
@@ -1847,7 +1854,21 @@ function sumBy(items, keyOf, valueOf) {
   return Array.from(totals, ([label, value]) => ({ label, value }));
 }
 
-function buildDailySummaryDays(tasks, projectsById, todayStr, startOfNextDayDiffMs, withCharts) {
+// Habits are Super Productivity's simple counters. A stopwatch habit counts in
+// milliseconds; the others (click counter, repeated reminder) count occurrences.
+// Only enabled habits with activity on the day are listed: the plugin API
+// doesn't expose streak targets, so "missed" can't be told from "not due".
+function habitLines(habits, date) {
+  return (habits || [])
+    .filter((h) => h && h.isEnabled !== false && h.countOnDay && h.countOnDay[date] > 0)
+    .map((h) => {
+      const value = h.countOnDay[date];
+      const text = h.type === 'StopWatch' ? formatDuration(value) : `${Math.round(value)}×`;
+      return `- ${h.title || 'Untitled habit'} — ${text}`;
+    });
+}
+
+function buildDailySummaryDays(tasks, projectsById, todayStr, startOfNextDayDiffMs, withCharts, habits) {
   const dayOf = (ms) => localDateStr(ms - startOfNextDayDiffMs);
   const days = [];
   const base = new Date(`${todayStr}T12:00:00`);
@@ -1880,7 +1901,8 @@ function buildDailySummaryDays(tasks, projectsById, todayStr, startOfNextDayDiff
   for (const date of days) {
     const doneItems = done.get(date);
     const spentItems = spent.get(date).sort((a, b) => b.ms - a.ms);
-    if (doneItems.length === 0 && spentItems.length === 0) continue;
+    const habitItems = habitLines(habits, date);
+    if (doneItems.length === 0 && spentItems.length === 0 && habitItems.length === 0) continue;
     const cap = (lines) =>
       lines.length > DAILY_MAX_LINES
         ? lines.slice(0, DAILY_MAX_LINES).concat(`…and ${lines.length - DAILY_MAX_LINES} more`)
@@ -1894,6 +1916,9 @@ function buildDailySummaryDays(tasks, projectsById, todayStr, startOfNextDayDiff
       blocks.push(
         [`**Time tracked — ${formatDuration(total)}**`, ...cap(spentItems.map((i) => `- ${i.label} — ${formatDuration(i.ms)}`))].join('\n'),
       );
+    }
+    if (habitItems.length > 0) {
+      blocks.push([`**Habits (${habitItems.length})**`, ...cap(habitItems)].join('\n'));
     }
     if (withCharts) {
       const minutes = (i) => i.ms / 60000;
@@ -1910,7 +1935,7 @@ function buildDailySummaryDays(tasks, projectsById, todayStr, startOfNextDayDiff
 }
 
 // Best-effort: a failure here is logged and never fails the main sync.
-async function syncDailySummaries(config, token, tasks, projectsById) {
+async function syncDailySummaries(config, token, tasks, projectsById, habits) {
   try {
     let todayStr = localDateStr(Date.now());
     let diff = 0;
@@ -1921,7 +1946,7 @@ async function syncDailySummaries(config, token, tasks, projectsById) {
         diff = ctx.startOfNextDayDiffMs || 0;
       }
     }
-    const days = buildDailySummaryDays(tasks, projectsById, todayStr, diff, config.dailySummaryCharts);
+    const days = buildDailySummaryDays(tasks, projectsById, todayStr, diff, config.dailySummaryCharts, config.dailySummaryHabits ? habits : []);
     while (days.length > 1 && JSON.stringify(days).length > DAILY_MAX_PAYLOAD_CHARS) days.pop();
     if (days.length === 0) return;
     const outcome = await PluginAPI.executeNodeScript({
