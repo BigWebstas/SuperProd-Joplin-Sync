@@ -8,6 +8,14 @@ The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Every user-visible change bumps `version` in `manifest.json` and
 `package.json`, plus `PLUGIN_VERSION` in `plugin.js`.
 
+## [1.15.1] - 2026-11-19
+
+### Fixed
+- **Large syncs no longer time out.** The per-call limit for the sync and
+  daily-summary scripts was 25 s (30 s in the manifest), so projects with many
+  tasks and changes failed with "Script execution timed out after 25000ms".
+  All are now 120 s.
+
 ## [1.15.0] - 2026-11-11
 
 ### Added

@@ -60,7 +60,7 @@
 
 // Keep in step with manifest.json/package.json: the plugin can't read its own
 // manifest, so this is what the update check compares against.
-const PLUGIN_VERSION = '1.15.0';
+const PLUGIN_VERSION = '1.15.1';
 const RELEASES_API_URL =
   'https://api.github.com/repos/BigWebstas/SuperProd-Joplin-Sync/releases/latest';
 
@@ -1569,7 +1569,7 @@ async function performSync(trigger) {
               syncProjectIndex: config.syncProjectIndex,
             },
           ],
-          timeout: 25000,
+          timeout: 120000,
         });
       } catch (e) {
         hardFailure = e.message || String(e);
@@ -1964,7 +1964,7 @@ async function syncDailySummaries(config, token, tasks, projectsById, habits) {
           days,
         },
       ],
-      timeout: 25000,
+      timeout: 120000,
     });
     if (!outcome || !outcome.success) {
       console.warn('Joplin Notes Sync: daily summary failed', outcome && outcome.error);
