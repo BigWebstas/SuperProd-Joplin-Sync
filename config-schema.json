@@ -22,7 +22,7 @@
       "description": "How often to sync. 0 = manual only; minimum 15.",
       "minimum": 0,
       "maximum": 3600,
-      "default": 60
+      "default": 300
     },
     "archiveRemovedNotes": {
       "type": "boolean",

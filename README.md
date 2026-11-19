@@ -34,7 +34,7 @@ option is off unless noted.
 
 | Category | Setting | What it does |
 |---|---|---|
-| General | Joplin Web Clipper URL, Parent notebook, Auto-sync interval | Where Joplin listens, the notebook that holds everything, and how often to sync (0 = manual only, minimum 15 s) |
+| General | Joplin Web Clipper URL, Parent notebook, Auto-sync interval | Where Joplin listens, the notebook that holds everything, and how often to sync (default 5 min; 0 = manual only, minimum 15 s) |
 | General | Archive instead of delete | Move notes removed from Super Productivity into an `Archive` sub-notebook |
 | Tasks | Sync task notes | Sync each task's Notes field with a `Tasks` sub-notebook (two-way) |
 | Tasks | One-way only | Super Productivity always wins; Joplin edits are never pulled back |

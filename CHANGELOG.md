@@ -16,6 +16,10 @@ Every user-visible change bumps `version` in `manifest.json` and
   tasks and changes failed with "Script execution timed out after 25000ms".
   All are now 120 s.
 
+### Changed
+- **Default auto-sync interval is now 5 minutes** (was 60 s). Only affects
+  installs that haven't set the interval themselves.
+
 ## [1.15.0] - 2026-11-11
 
 ### Added

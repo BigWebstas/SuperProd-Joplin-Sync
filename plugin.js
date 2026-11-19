@@ -72,7 +72,7 @@ const MIN_INTERVAL_SEC = 15;
 const DEFAULTS = {
   joplinUrl: 'http://127.0.0.1:41184',
   parentNotebookTitle: 'Super Productivity',
-  syncIntervalSec: 60,
+  syncIntervalSec: 300,
   syncTaskNotes: false,
   taskNotesOneWay: false,
   syncTaskTags: false,
